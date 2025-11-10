@@ -1,4 +1,3 @@
-// src/routes/adminRoutes.js
 import express from "express";
 import { getAdminDashboard } from "../controllers/adminController.js";
 import { protect, adminOnly } from "../middleware/authMiddleware.js";

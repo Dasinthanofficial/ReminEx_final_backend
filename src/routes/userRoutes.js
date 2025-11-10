@@ -1,4 +1,3 @@
-// src/routes/userRoutes.js
 import express from "express";
 import { getUserDashboard, getUserMonthlyReport } from "../controllers/userController.js";
 import { protect } from "../middleware/authMiddleware.js";

@@ -1,4 +1,3 @@
-// src/routes/planRoutes.js
 import express from "express";
 import { createPlan, getPlans, updatePlan, deletePlan } from "../controllers/planController.js";
 import { protect, adminOnly } from "../middleware/authMiddleware.js";
