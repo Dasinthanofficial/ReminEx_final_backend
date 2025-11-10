@@ -14,6 +14,7 @@ import sendEmail from "./utils/sendEmail.js";
 import planRoutes from "./routes/planRoutes.js";
 import advertisementRoutes from "./routes/advertisementRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
+import cors from "cors";
 
 dotenv.config();
 connectDB();
