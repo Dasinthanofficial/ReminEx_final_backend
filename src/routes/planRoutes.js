@@ -1,31 +1,17 @@
-// import express from "express";
-// import { getPlans, createPlan, updatePlan } from "../controllers/planController.js";
-// import { protect, adminOnly } from "../middleware/authMiddleware.js";
-
-// const router = express.Router();
-
-// // Anyone can view plans
-// router.get("/", getPlans);
-
-// // Admin only
-// router.post("/", protect, adminOnly, createPlan);
-// router.put("/:id", protect, adminOnly, updatePlan);
-
-// export default router;
-
-
+// src/routes/planRoutes.js
 import express from "express";
 import { createPlan, getPlans, updatePlan, deletePlan } from "../controllers/planController.js";
 import { protect, adminOnly } from "../middleware/authMiddleware.js";
+import { validatePlan, validateMongoId } from "../middleware/validators.js";
 
 const router = express.Router();
 
+// ✅ Public route - anyone can view available plans
 router.get("/", getPlans);
-router.post("/", protect, adminOnly, createPlan);
-router.put("/:id", protect, adminOnly, updatePlan);
-router.delete("/:id", protect, adminOnly, deletePlan);
+
+// ✅ Admin only routes - with validation
+router.post("/", protect, adminOnly, validatePlan, createPlan);
+router.put("/:id", protect, adminOnly, validateMongoId, validatePlan, updatePlan);
+router.delete("/:id", protect, adminOnly, validateMongoId, deletePlan);
 
 export default router;
-
-
-

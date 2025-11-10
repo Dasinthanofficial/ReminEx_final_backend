@@ -33,7 +33,7 @@ export const getUserMonthlyReport = async (req, res) => {
 
     // monthly waste: products with expiryDate within month and not used (wasted)
     const agg = await Product.aggregate([
-      { $match: { user: mongoose.Types.ObjectId(req.user._id), expiryDate: { $gte: start, $lte: end } } },
+      { $match: { user: new mongoose.Types.ObjectId(req.user._id), expiryDate: { $gte: start, $lte: end } } },
       { $group: { _id: null, totalWaste: { $sum: "$price" }, count: { $sum: 1 } } }
     ]);
 

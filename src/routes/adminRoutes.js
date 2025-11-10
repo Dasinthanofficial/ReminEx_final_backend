@@ -1,10 +1,12 @@
+// src/routes/adminRoutes.js
 import express from "express";
 import { getAdminDashboard } from "../controllers/adminController.js";
 import { protect, adminOnly } from "../middleware/authMiddleware.js";
+import { validateMonthYear } from "../middleware/validators.js";
 
 const router = express.Router();
-router.get("/dashboard", protect, adminOnly, getAdminDashboard);
 
-// add plan/ad management routes as needed.
+// ✅ Admin dashboard - with optional month/year filtering
+router.get("/dashboard", protect, adminOnly, validateMonthYear, getAdminDashboard);
 
 export default router;

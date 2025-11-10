@@ -33,3 +33,4 @@ userSchema.methods.matchPassword = async function (entered) {
 };
 
 export default mongoose.model("User", userSchema);
+

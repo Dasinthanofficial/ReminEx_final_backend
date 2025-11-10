@@ -8,16 +8,21 @@ import {
 } from "../controllers/productController.js";
 import { getRecipeSuggestion } from "../controllers/geminiController.js";
 import { protect } from "../middleware/authMiddleware.js";
+import { checkPlanExpiry, requirePremium } from "../middleware/checkPlanExpiry.js";
 
 const router = express.Router();
 
-router.post("/", protect, addProduct);
-router.get("/", protect, getProducts);
-router.get("/:id", protect, getProduct);
-router.put("/:id", protect, updateProduct);
-router.delete("/:id", protect, deleteProduct);
+// ✅ Check plan expiry on all product routes
+router.use(protect, checkPlanExpiry);
 
-// ✅ FIXED: use the correct function name
-router.post("/:id/recipe", protect, getRecipeSuggestion);
+// Basic product CRUD - all users
+router.post("/", addProduct);
+router.get("/", getProducts);
+router.get("/:id", getProduct);
+router.put("/:id", updateProduct);
+router.delete("/:id", deleteProduct);
+
+// ✅ Recipe suggestions - premium only
+router.post("/recipe", requirePremium, getRecipeSuggestion);
 
 export default router;
