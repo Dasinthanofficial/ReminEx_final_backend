@@ -31,9 +31,17 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// ✅ CRITICAL FIX: Webhook route MUST come BEFORE express.json()
+// ✅ CRITICAL: Webhook route MUST come BEFORE express.json()
 // This preserves the raw body for Stripe signature verification
 app.use("/api/payment/webhook", express.raw({ type: "application/json" }));
+
+// ✅ CORS Configuration - Must come BEFORE routes
+app.use(cors({
+  origin: process.env.CLIENT_URL || "http://localhost:5173",
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 // ✅ Now apply JSON parser for all OTHER routes
 app.use(express.json());

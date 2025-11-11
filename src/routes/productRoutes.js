@@ -24,5 +24,6 @@ router.delete("/:id", deleteProduct);
 
 // ✅ Recipe suggestions - premium only
 router.post("/recipe", requirePremium, getRecipeSuggestion);
+router.post("/:id/recipe", protect, getRecipeSuggestion);
 
 export default router;

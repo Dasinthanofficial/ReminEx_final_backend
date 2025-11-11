@@ -5,6 +5,7 @@ import Plan from "../models/Plan.js";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
+
 // ✅ Create Stripe Checkout session
 export const createCheckoutSession = async (req, res) => {
   try {
