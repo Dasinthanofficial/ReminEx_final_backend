@@ -82,115 +82,87 @@
 //   }
 // };
 
-
-// src/controllers/geminiController.js
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import Product from "../models/Product.js";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-/**
- * Get AI recipe suggestions based on user's expiring products
- * Premium feature only - Uses FREE Gemini API
- */
 export const getRecipeSuggestion = async (req, res) => {
   try {
     const userId = req.user._id;
-    
-    // ✅ Automatically fetch products expiring in next 7 days
+
+    // 1️⃣  Fetch food products expiring within 7 days
+    const now = new Date();
     const sevenDaysFromNow = new Date();
-    sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
-    
+    sevenDaysFromNow.setDate(now.getDate() + 7);
+
     const expiringProducts = await Product.find({
       user: userId,
-      category: "Food", // Only food products for recipes
-      expiryDate: { 
-        $gte: new Date(), // Not already expired
-        $lte: sevenDaysFromNow // Expires within 7 days
-      }
-    }).limit(10); // Limit to 10 products to avoid token limits
-    
+      category: "Food",
+      expiryDate: { $gte: now, $lte: sevenDaysFromNow },
+    }).limit(10);
+
     if (expiringProducts.length === 0) {
-      return res.status(404).json({ 
-        message: "No food products expiring soon. Add some products to get recipe suggestions!",
-        suggestion: "Try adding food items with expiry dates within the next 7 days."
+      return res.status(404).json({
+        message:
+          "No food products expiring soon. Add items with expiry dates within the next 7 days.",
       });
     }
-    
-    // Extract product names
-    const productNames = expiringProducts.map(p => p.name).join(", ");
-    const expiryDates = expiringProducts.map(p => 
-      `${p.name} (expires ${p.expiryDate.toDateString()})`
-    ).join("\n");
-    
-    // ✅ Generate recipe using FREE Gemini API (gemini-1.5-flash)
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash",
-      generationConfig: {
-        temperature: 0.7,
-        topP: 0.8,
-        topK: 40,
-        maxOutputTokens: 1024,
-      }
-    });
-    
-    const prompt = `You are a helpful cooking assistant. I have these ingredients that are expiring soon:
 
-${expiryDates}
+    // 2️⃣  Build prompt
+    const expiryList = expiringProducts
+      .map((p) => `${p.name} (expires ${p.expiryDate.toDateString()})`)
+      .join("\n");
 
-Please suggest a simple, delicious recipe that uses as many of these ingredients as possible. Include:
-1. Recipe name
-2. Ingredients list (with quantities)
-3. Step-by-step cooking instructions
-4. Estimated cooking time
+    const prompt = `
+You are a friendly cooking assistant. I have these ingredients expiring soon:
 
-Make it practical and easy to follow!`;
-    
+${expiryList}
+
+Create one simple, delicious recipe that uses as many of these as possible.
+Include:
+1. A recipe name
+2. Ingredients list with quantities
+3. Step-by-step instructions
+4. Total cooking time
+Make it easy and realistic!
+`;
+
+    // 3️⃣  Call Gemini
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
     const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const aiText = response.text();
-    
+    const text = await result.response.text();
+
+    // 4️⃣  Respond
     res.json({
       success: true,
-      expiringProducts: expiringProducts.map(p => ({
+      recipe: text,
+      expiringProducts: expiringProducts.map((p) => ({
         id: p._id,
         name: p.name,
         expiryDate: p.expiryDate,
-        daysUntilExpiry: Math.ceil((new Date(p.expiryDate) - new Date()) / (1000 * 60 * 60 * 24))
+        daysUntilExpiry: Math.ceil(
+          (new Date(p.expiryDate) - now) / (1000 * 60 * 60 * 24)
+        ),
       })),
-      recipe: aiText,
       message: `Recipe suggestion based on ${expiringProducts.length} expiring product(s)`,
-      model: "gemini-1.5-flash" // Shows which model was used
     });
-    
   } catch (error) {
-    console.error("Gemini API Error:", error);
-    
-    // Handle specific API errors
+    console.error("Gemini API Error:", error);
+
     if (error.message?.includes("API key")) {
-      return res.status(500).json({ 
-        message: "AI service configuration error. Please contact support.",
-        hint: "Check if GEMINI_API_KEY is set in .env file"
+      return res.status(500).json({
+        message:
+          "AI service configuration error. Check your GEMINI_API_KEY in .env.",
       });
     }
-    
-    if (error.message?.includes("quota")) {
-      return res.status(429).json({ 
-        message: "AI service quota exceeded. Please try again later.",
-        hint: "Free tier has usage limits"
-      });
-    }
-    
-    if (error.message?.includes("model not found")) {
-      return res.status(500).json({ 
-        message: "AI model configuration error. Please contact support.",
-        hint: "gemini-1.5-flash model is required"
-      });
-    }
-    
-    res.status(500).json({ 
-      message: "Failed to generate recipe suggestion. Please try again later.",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+
+    res.status(500).json({
+      message:
+        "Failed to generate recipe suggestion. Please try again later.",
+      error:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
