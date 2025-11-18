@@ -6,24 +6,23 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-// ✅ REGISTER - Users only (NO admin registration via API)
+
 export const register = async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
-    // Check if user already exists
+   
     const exists = await User.findOne({ email });
     if (exists) {
       return res.status(400).json({ message: "Email already registered" });
     }
 
-    // ✅ SECURITY: Always create as regular user
-    // Admin accounts must be created via separate script
+ 
     const user = await User.create({
       name,
       email,
       password,
-      role: "user" // Hardcoded - no admin registration via API
+      role: "user" 
     });
 
     const token = generateToken(user._id, user.role);

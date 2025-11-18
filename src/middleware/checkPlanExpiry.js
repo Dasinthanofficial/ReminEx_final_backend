@@ -28,10 +28,7 @@ export const checkPlanExpiry = async (req, res, next) => {
   }
 };
 
-/**
- * Middleware to ensure user has a premium plan (Monthly or Yearly)
- * Use this for premium-only features
- */
+
 export const requirePremium = (req, res, next) => {
   const user = req.user;
 

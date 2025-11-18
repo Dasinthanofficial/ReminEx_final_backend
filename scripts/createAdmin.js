@@ -77,5 +77,4 @@ const createAdmin = async () => {
   }
 };
 
-// Run the script
 createAdmin();
