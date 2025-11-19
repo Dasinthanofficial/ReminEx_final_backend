@@ -1,3 +1,4 @@
+// src/controllers/geminiController.js
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import Product from "../models/Product.js";
 
@@ -10,7 +11,7 @@ export const getRecipeSuggestion = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // 1️⃣  Find expiring "Food" items within 7 days
+    // 1️⃣ Find expiring "Food" items within 7 days
     const now = new Date();
     const sevenDaysLater = new Date();
     sevenDaysLater.setDate(now.getDate() + 7);
@@ -24,14 +25,14 @@ export const getRecipeSuggestion = async (req, res) => {
     if (!products.length) {
       return res.status(404).json({
         success: false,
-        message: "No food items expiring within 7 days.",
+        message: "No food items expiring within 7 days.",
       });
     }
 
-    // 2️⃣  Use the stable model for free‑tier keys
+    // 2️⃣ Use the stable model
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
-    // 3️⃣  Helper functions
+    // 3️⃣ Helper functions
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
     const tryGenerate = async (prompt, retries = 5) => {
@@ -41,10 +42,12 @@ export const getRecipeSuggestion = async (req, res) => {
           return result.response.text();
         } catch (err) {
           const msg = err.message || "";
-          // Retry on overload (503) or rate limit (429)
+          // Retry on overload (503) or rate limit (429)
           if ((msg.includes("503") || msg.includes("429")) && i < retries - 1) {
-            const delay = 2000 * (i + 1); // 2 s → 4 s → 6 s → …
-            console.warn(`Gemini busy (attempt ${i + 1}); retrying in ${delay} ms…`);
+            const delay = 2000 * (i + 1); // 2s → 4s → 6s ...
+            console.warn(
+              `Gemini busy (attempt ${i + 1}); retrying in ${delay} ms…`
+            );
             await sleep(delay);
             continue;
           }
@@ -53,24 +56,24 @@ export const getRecipeSuggestion = async (req, res) => {
       }
     };
 
-    // 4️⃣  Generate each recipe sequentially
+    // 4️⃣ Generate each recipe sequentially
     const output = [];
 
     for (const p of products) {
       const prompt = `
-You are a friendly home‑cook AI 👩‍🍳😊.
+You are a friendly home‑cook AI.
 
-Write a short, realistic recipe that uses *${p.name}* 
-(expiring ${p.expiryDate.toDateString()}).
+Write a short, realistic recipe that uses *${p.name}*
+(expiring ${p.expiryDate.toDateString()}).
 
-Format clearly with emojis:
+Format clearly:
 
-🍽️ Dish Name  
-🧂 Ingredients  
-👨‍🍳 Instructions  
-🕒 Total Time (in minutes)  
+🍽️ Dish Name
+🧂 Ingredients
+👨‍🍳 Instructions
+🕒 Total Time (in minutes)
 
-Keep the recipe under 150 words and easy for beginners.
+Keep the recipe under 150 words and easy for beginners.
 `;
 
       try {
@@ -82,31 +85,71 @@ Keep the recipe under 150 words and easy for beginners.
           recipe: recipeText,
         });
       } catch (err) {
-        console.error(`❌ Gemini failed for ${p.name}:`, err.message);
+        console.error(`Gemini failed for ${p.name}:`, err.message);
         output.push({
           id: p._id,
           name: p.name,
           expiryDate: p.expiryDate,
-          recipe: `⚠️ Error generating recipe: ${err.message}`,
+          recipe: `Error generating recipe: ${err.message}`,
         });
       }
 
-      // Slow down between calls to stay within free‑tier limits
+      // Slow down between calls to stay within free-tier limits
       await sleep(3000);
     }
 
-    // 5️⃣  Send the result
+    // 5️⃣ Send the result
     res.json({
       success: true,
       count: output.length,
       recipes: output,
-      message: `Generated ${output.length} recipe(s).`,
+      message: `Generated ${output.length} recipe(s).`,
     });
   } catch (error) {
-    console.error("Gemini Error:", error);
+    console.error("Gemini Error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to generate recipes.",
+      error:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};
+
+/**
+ * Translate recipe text into a target language
+ */
+export const translateText = async (req, res) => {
+  try {
+    const { text, targetLang } = req.body;
+
+    if (!text || !targetLang) {
+      return res
+        .status(400)
+        .json({ success: false, message: "text and targetLang are required" });
+    }
+
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+
+    const prompt = `
+You are a translation assistant.
+Translate the following recipe text to ${targetLang}.
+Keep the formatting (headings, bullet points, emojis) as much as possible.
+Do NOT add explanations, just return the translated text.
+
+TEXT:
+${text}
+`;
+
+    const result = await model.generateContent(prompt);
+    const translated = result.response.text();
+
+    res.json({ success: true, translated });
+  } catch (error) {
+    console.error("Translate error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to translate",
       error:
         process.env.NODE_ENV === "development" ? error.message : undefined,
     });

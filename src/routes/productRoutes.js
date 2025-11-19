@@ -7,7 +7,10 @@ import {
   updateProduct,
   deleteProduct,
 } from "../controllers/productController.js";
-import { getRecipeSuggestion } from "../controllers/geminiController.js";
+import {
+  getRecipeSuggestion,
+  translateText,          // 🟢 import translateText
+} from "../controllers/geminiController.js";
 import { protect } from "../middleware/authMiddleware.js";
 import { checkPlanExpiry, requirePremium } from "../middleware/checkPlanExpiry.js";
 import {
@@ -22,10 +25,11 @@ const router = express.Router();
 // 🛡️ Protect all routes & check plan expiry first
 router.use(protect, checkPlanExpiry);
 
-
+// AI: recipe suggestions (premium users only)
 router.post("/recipe", requirePremium, getRecipeSuggestion);
 
-
+// 🟢 AI: translate recipe text (you can keep this free or add requirePremium)
+router.post("/translate", translateText);
 
 // ✅ Get products
 router.get("/", getProducts);
@@ -54,4 +58,3 @@ router.put(
 router.delete("/:id", validateMongoId, deleteProduct);
 
 export default router;
-
