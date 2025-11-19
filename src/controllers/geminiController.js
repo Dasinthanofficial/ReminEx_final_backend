@@ -3,78 +3,89 @@ import Product from "../models/Product.js";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+/**
+ * Generate one recipe per expiring food product.
+ */
 export const getRecipeSuggestion = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // 1️⃣ Fetch food products expiring within 7 days
+    // 1️⃣ Find Food items expiring within 7 days
     const now = new Date();
-    const sevenDaysFromNow = new Date();
-    sevenDaysFromNow.setDate(now.getDate() + 7);
+    const sevenDays = new Date(now);
+    sevenDays.setDate(now.getDate() + 7);
 
     const expiringProducts = await Product.find({
       user: userId,
       category: "Food",
-      expiryDate: { $gte: now, $lte: sevenDaysFromNow },
+      expiryDate: { $gte: now, $lte: sevenDays },
     }).limit(10);
 
-    if (expiringProducts.length === 0) {
+    if (!expiringProducts.length) {
       return res.status(404).json({
-        message: "No food products expiring soon. Add items with expiry dates within the next 7 days.",
+        message:
+          "No food products expiring soon. Add some items that expire within the next 7 days.",
       });
     }
 
-    // 2️⃣ Build prompt
-    const expiryList = expiringProducts
-      .map((p) => `${p.name} (expires ${p.expiryDate.toDateString()})`)
-      .join("\n");
+    // 2️⃣ Prepare Gemini model
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    const prompt = `
-You are a friendly cooking assistant. I have these ingredients expiring soon:
+    // 3️⃣ Iterate through products and generate a recipe for each one
+    const recipeResults = [];
+    for (const product of expiringProducts) {
+      const prompt = `
+You are a friendly home‑cook AI assistant.
+Give me ONE simple, tasty recipe that mainly features *${product.name}*,
+which expires on ${product.expiryDate.toDateString()}.
 
-${expiryList}
-
-Create one simple, delicious recipe that uses as many of these as possible.
 Include:
-1. A recipe name
-2. Ingredients list with quantities
-3. Step-by-step instructions
-4. Total cooking time
-Make it easy and realistic!
+1.Recipe name
+2.Short introduction (1–2 lines)
+3.Ingredients list with realistic quantities
+4.Step‑by‑step cooking instructions
+5.Total cooking time
+Keep it brief and practical for everyday cooking.
 `;
 
-    // 3️⃣ Call Gemini - ✅ FIXED: Use correct model name
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-    const result = await model.generateContent(prompt);
-    const text = await result.response.text();
-
-    // 4️⃣ Respond
-    res.json({
-      success: true,
-      recipe: text,
-      expiringProducts: expiringProducts.map((p) => ({
-        id: p._id,
-        name: p.name,
-        expiryDate: p.expiryDate,
-        daysUntilExpiry: Math.ceil(
-          (new Date(p.expiryDate) - now) / (1000 * 60 * 60 * 24)
-        ),
-      })),
-      message: `Recipe suggestion based on ${expiringProducts.length} expiring product(s)`,
-    });
-  } catch (error) {
-    console.error("Gemini API Error:", error);
-
-    if (error.message?.includes("API key")) {
-      return res.status(500).json({
-        message: "AI service configuration error. Check your GEMINI_API_KEY in .env.",
-      });
+      try {
+        const result = await model.generateContent(prompt);
+        const text = result.response.text();
+        recipeResults.push({
+          id: product._id,
+          name: product.name,
+          expiryDate: product.expiryDate,
+          recipe: text,
+        });
+      } catch (innerErr) {
+        console.warn(`Gemini failed for ${product.name}:`, innerErr.message);
+        recipeResults.push({
+          id: product._id,
+          name: product.name,
+          expiryDate: product.expiryDate,
+          recipe: "*Error generating recipe for this product.*",
+        });
+      }
     }
 
+    // 4️⃣ Respond
+    res.json({
+      success: true,
+      count: recipeResults.length,
+      recipes: recipeResults,
+      message: `Generated ${recipeResults.length} recipes for expiring product(s).`,
+    });
+  } catch (error) {
+    console.error("Gemini API Error:", error);
+    if (error.message?.includes("API key")) {
+      return res.status(500).json({
+        message: "AI service configuration error. Check GEMINI_API_KEY in .env.",
+      });
+    }
     res.status(500).json({
-      message: "Failed to generate recipe suggestion. Please try again later.",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+      message: "Failed to generate recipe suggestions.",
+      error:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };

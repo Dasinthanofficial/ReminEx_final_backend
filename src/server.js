@@ -1,9 +1,10 @@
+// src/server.js
 import express from "express";
 import dotenv from "dotenv";
-import path from "path";
-import { fileURLToPath } from "url";
-import fs from "fs";
 import cors from "cors";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
 import cron from "node-cron";
 
 import connectDB from "./config/db.js";
@@ -18,29 +19,37 @@ import adminRoutes from "./routes/adminRoutes.js";
 import planRoutes from "./routes/planRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
 
-// 1️⃣ Load environment variables first
+// ---------------------------------------------------------------
+// 1️⃣ Load environment variables and connect the database
+// ---------------------------------------------------------------
 dotenv.config();
 connectDB();
 
 const app = express();
 
-// 2️⃣ Path utilities for ES Modules
+// ---------------------------------------------------------------
+// 2️⃣ Path helpers (works in ES‑modules)
+// ---------------------------------------------------------------
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 3️⃣ Ensure "uploads" directory exists
+// ---------------------------------------------------------------
+// 3️⃣ Guarantee the uploads directory exists once at startup
+// ---------------------------------------------------------------
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log("📁 Created uploads directory:", uploadsDir);
 }
 
-// 4️⃣ Stripe Webhook – must be BEFORE express.json()
-app.use(
-  "/api/payment/webhook",
-  express.raw({ type: "application/json" })
-);
+// ---------------------------------------------------------------
+// 4️⃣ Stripe Webhook: must come BEFORE express.json()
+// ---------------------------------------------------------------
+app.use("/api/payment/webhook", express.raw({ type: "application/json" }));
 
-// 5️⃣ Global Middleware
+// ---------------------------------------------------------------
+// 5️⃣ Generic middleware
+// ---------------------------------------------------------------
 app.use(
   cors({
     origin: process.env.CLIENT_URL || "http://localhost:5173",
@@ -49,24 +58,27 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-
-// ✅ JSON parser for all other routes (keep AFTER webhook)
 app.use(express.json());
 
-// ✅ Static files
+// ---------------------------------------------------------------
+// 6️⃣ Serve images statically from /uploads
+// ---------------------------------------------------------------
 app.use("/uploads", express.static(uploadsDir));
 
-// 6️⃣ API Routes
+// ---------------------------------------------------------------
+// 7️⃣ API Routes
+// ---------------------------------------------------------------
 app.get("/", (req, res) => res.send("Food Expiry Tracker API Running"));
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/plans", planRoutes);
-
 app.use("/api/payment", paymentRoutes);
 
-// 7️⃣ CRON – Daily 7-day expiry notifications - ✅ FIXED: Better error handling
+// ---------------------------------------------------------------
+// 8️⃣ Daily 7‑day expiry notification job
+// ---------------------------------------------------------------
 cron.schedule("0 0 * * *", async () => {
   try {
     console.log("📬 Running daily expiry job:", new Date().toISOString());
@@ -83,63 +95,56 @@ cron.schedule("0 0 * * *", async () => {
       expiryDate: { $gte: start, $lte: end },
     }).populate("user", "email name");
 
-    let successCount = 0;
-    let failCount = 0;
+    let success = 0, fail = 0;
 
     for (const p of products) {
-      if (!p.user?.email) {
-        console.log(`⚠️ Skipping product ${p.name} - no user email`);
-        continue;
-      }
-
+      if (!p.user?.email) continue;
       try {
         const subject = `⏰ Expiry Alert: ${p.name} expires in 7 days`;
         const text = `Hi ${p.user.name || "there"},\n\nYour product "${p.name}" will expire on ${p.expiryDate.toDateString()}.\n\nPlease use it before it expires to avoid waste!\n\n— Food Expiry Tracker Team`;
-
         await sendEmail(p.user.email, subject, text);
-        console.log(`📧 Sent reminder to ${p.user.email} for ${p.name}`);
-        successCount++;
+        success++;
       } catch (emailErr) {
         console.error(`❌ Failed to send email to ${p.user.email}:`, emailErr.message);
-        failCount++;
+        fail++;
       }
     }
 
-    console.log(`✅ Email job complete: ${successCount} sent, ${failCount} failed out of ${products.length} total`);
+    console.log(`✅ Email job: ${success} sent, ${fail} failed of ${products.length}`);
   } catch (err) {
     console.error("❌ Cron job error:", err);
   }
 });
 
-// 8️⃣ 404 Handler
-app.use((req, res) => {
-  res.status(404).json({ message: "Route not found" });
-});
+// ---------------------------------------------------------------
+// 9️⃣ 404 Handler
+// ---------------------------------------------------------------
+app.use((req, res) => res.status(404).json({ message: "Route not found" }));
 
-// 9️⃣ Global Error Handler
+// 🔟 Global error handler
 app.use((err, req, res, next) => {
   console.error("💥 Server Error:", err);
 
   if (err.name === "MulterError") {
-    if (err.code === "LIMIT_FILE_SIZE") {
-      return res.status(400).json({ message: "File too large (max 5 MB)" });
-    }
+    if (err.code === "LIMIT_FILE_SIZE")
+      return res.status(400).json({ message: "File too large (max 5 MB)" });
     return res.status(400).json({ message: err.message });
   }
 
-
-  if (req.originalUrl === "/api/payment/webhook") {
+  if (req.originalUrl === "/api/payment/webhook")
     return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
 
   res.status(err.status || 500).json({
-    message: err.message || "Internal server error",
+    message: err.message || "Internal Server Error",
     ...(process.env.NODE_ENV === "development" && { stack: err.stack }),
   });
 });
 
+// ---------------------------------------------------------------
+// 11️⃣ Start server
+// ---------------------------------------------------------------
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log("📅 Daily cron job scheduled at 00:00 (midnight)");
+  console.log("📅 Daily cron job scheduled at midnight");
 });

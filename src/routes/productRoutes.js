@@ -1,51 +1,57 @@
+// src/routes/productRoutes.js
 import express from "express";
 import {
-  addProduct,
   getProducts,
   getProduct,
+  addProduct,
   updateProduct,
-  deleteProduct
+  deleteProduct,
 } from "../controllers/productController.js";
 import { getRecipeSuggestion } from "../controllers/geminiController.js";
 import { protect } from "../middleware/authMiddleware.js";
 import { checkPlanExpiry, requirePremium } from "../middleware/checkPlanExpiry.js";
-import { validateProduct, validateProductUpdate, validateMongoId } from "../middleware/validators.js";
-import upload from "../middleware/uploadMiddleware.js"; // Ensure this path is correct
+import {
+  validateProduct,
+  validateProductUpdate,
+  validateMongoId,
+} from "../middleware/validators.js";
+import upload from "../middleware/uploadMiddleware.js";
 
 const router = express.Router();
 
-// Apply authentication and plan expiry check to ALL routes below
+// 🛡️ Protect all routes & check plan expiry first
 router.use(protect, checkPlanExpiry);
 
-// ✅ GET Routes (No changes needed)
+
+router.post("/recipe", requirePremium, getRecipeSuggestion);
+
+
+
+// ✅ Get products
 router.get("/", getProducts);
+
+// ✅ Get single product
 router.get("/:id", validateMongoId, getProduct);
 
-// ✅ POST Route (Add Product)
-// 1. Upload file (populates req.body & req.file)
-// 2. Validate inputs
-// 3. Call Controller
+// ✅ Add product (supports image file or URL)
 router.post(
-  "/", 
-  upload.single("image"), 
-  validateProduct, 
+  "/",
+  upload.single("image"),   // field name must match frontend FormData key
+  validateProduct,
   addProduct
 );
 
-// ✅ PUT Route (Update Product)
-// Added upload.single("image") so users can update the image
+// ✅ Update existing product
 router.put(
-  "/:id", 
-  validateMongoId, 
-  upload.single("image"), 
-  validateProductUpdate, 
+  "/:id",
+  validateMongoId,
+  upload.single("image"),
+  validateProductUpdate,
   updateProduct
 );
 
-// ✅ DELETE Route
+// ✅ Delete product
 router.delete("/:id", validateMongoId, deleteProduct);
 
-// ✅ AI Recipe Route
-router.post("/recipe", requirePremium, getRecipeSuggestion);
-
 export default router;
+

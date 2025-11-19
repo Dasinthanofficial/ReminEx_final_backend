@@ -1,70 +1,10 @@
 import Product from "../models/Product.js";
-import User from "../models/User.js";
-import fs from "fs"; // Import file system module to delete images if needed
+import fs from "fs";
+import path from "path";
 
 /**
- * Add Product (Free users <=5). 
- * Supports Image Upload via req.file
+ * 🟢  GET all products for current user
  */
-export const addProduct = async (req, res) => {
-  try {
-    const { name, weight, expiryDate, price, category } = req.body;
-
-    // 1. Validate category
-    if (!["Food", "Non-Food"].includes(category)) {
-      return res.status(400).json({ message: "Invalid category" });
-    }
-
-    // 2. Safe product count check
-    const currentCount = req.user.productCount || 0;
-
-    // 3. Enforce free limit
-    if (req.user.plan === "Free" && currentCount >= 5) {
-      // ⚠️ IMPORTANT: If user uploaded a file but failed this check, 
-      // we should delete the uploaded file to save server space.
-      if (req.file) {
-        fs.unlink(req.file.path, (err) => {
-          if (err) console.error("Error deleting file after limit check:", err);
-        });
-      }
-
-      return res.status(403).json({
-        message: "Free plan allows only 5 products. Upgrade to Premium.",
-        currentCount,
-        maxAllowed: 5
-      });
-    }
-
-    // 4. Handle Image Path
-    // If a file is uploaded, use the file path. 
-    // If not, check if a URL string was sent in body (fallback).
-    let imagePath = req.body.image || ""; 
-    if (req.file) {
-      // Standardize path slashes for Windows/Linux compatibility
-      imagePath = req.file.path.replace(/\\/g, "/");
-    }
-
-    const product = await Product.create({
-      user: req.user._id,
-      name,
-      image: imagePath, // Save the path/URL
-      weight,
-      expiryDate,
-      price,
-      category,
-    });
-
-    // 5. Increment productCount
-    req.user.productCount = currentCount + 1;
-    await req.user.save();
-
-    res.status(201).json({ message: "Product added successfully", product });
-  } catch (err) {
-    console.error("Error adding product:", err);
-    res.status(500).json({ message: err.message });
-  }
-};
-
 export const getProducts = async (req, res) => {
   try {
     const products = await Product.find({ user: req.user._id }).sort({ createdAt: -1 });
@@ -75,6 +15,9 @@ export const getProducts = async (req, res) => {
   }
 };
 
+/**
+ * 🟢  GET a single product by ID
+ */
 export const getProduct = async (req, res) => {
   try {
     const product = await Product.findOne({ _id: req.params.id, user: req.user._id });
@@ -86,42 +29,108 @@ export const getProduct = async (req, res) => {
   }
 };
 
+/**
+ * 🟢  ADD product (supports image file or URL)
+ * Free plan users limited to 5 products
+ */
+export const addProduct = async (req, res) => {
+  try {
+    const { name, weight, expiryDate, price, category } = req.body;
+
+    // Validate category
+    if (!["Food", "Non-Food"].includes(category)) {
+      return res.status(400).json({ message: "Invalid category" });
+    }
+
+    // Enforce Free-plan product limit
+    const currentCount = req.user.productCount || 0;
+    if (req.user.plan === "Free" && currentCount >= 5) {
+      if (req.file) fs.unlink(req.file.path, () => {});
+      return res.status(403).json({
+        message: "Free plan allows only 5 products. Upgrade to Premium.",
+        currentCount,
+        maxAllowed: 5,
+      });
+    }
+
+    // ✅ Handle image path
+    let imagePath = req.body.image || "";
+    if (req.file) {
+      // Multer gives something like "uploads/filename.png" or "src/uploads/filename.png"
+      const fileName = path.basename(req.file.path);
+      imagePath = `/uploads/${fileName}`; // ✅ always relative web path
+    }
+
+    // If relative, prepend base URL for frontend convenience
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const webUrl = imagePath.startsWith("http")
+      ? imagePath
+      : `${baseUrl}${imagePath}`;
+
+    const product = await Product.create({
+      user: req.user._id,
+      name,
+      weight,
+      expiryDate,
+      price,
+      category,
+      image: webUrl, // ✅ store web-visible URL
+    });
+
+    req.user.productCount = currentCount + 1;
+    await req.user.save();
+
+    res.status(201).json({ message: "Product added successfully", product });
+  } catch (err) {
+    console.error("Error adding product:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+/**
+ * 🟢  UPDATE product (supports new file, URL, or details only)
+ */
 export const updateProduct = async (req, res) => {
   try {
     const product = await Product.findOne({ _id: req.params.id, user: req.user._id });
     if (!product) return res.status(404).json({ message: "Product not found" });
 
     const { name, weight, expiryDate, price, category } = req.body;
-
     if (category && !["Food", "Non-Food"].includes(category)) {
       return res.status(400).json({ message: "Invalid category" });
     }
 
-    // Handle Image Update
-    let imagePath = product.image; // Default to existing image
-    
-    if (req.file) {
-      // 1. If there's a new file, use it
-      imagePath = req.file.path.replace(/\\/g, "/");
+    let imagePath = product.image;
 
-      // 2. (Optional) Delete the OLD image file from server to save space
-      // Only do this if the old image was a local file (not a web URL)
-      if (product.image && !product.image.startsWith("http")) {
-        fs.unlink(product.image, (err) => {
-           if(err) console.log("Failed to delete old image:", err);
-        });
+    if (req.file) {
+      // Remove old local image if present
+      if (product.image && product.image.includes("/uploads/")) {
+        const oldFile = product.image.split("/uploads/")[1];
+        const deletePath = path.join(process.cwd(), "uploads", oldFile);
+        fs.unlink(deletePath, () => {});
       }
+
+      // Replace with new file
+      const fileName = path.basename(req.file.path);
+      imagePath = `/uploads/${fileName}`;
     } else if (req.body.image) {
-      // If they sent a string URL instead of a file
       imagePath = req.body.image;
     }
 
-    product.name = name ?? product.name;
-    product.image = imagePath;
-    product.weight = weight ?? product.weight;
-    product.expiryDate = expiryDate ?? product.expiryDate;
-    product.price = price ?? product.price;
-    product.category = category ?? product.category;
+    // Ensure final web URL
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const webUrl = imagePath.startsWith("http")
+      ? imagePath
+      : `${baseUrl}${imagePath}`;
+
+    Object.assign(product, {
+      name: name ?? product.name,
+      weight: weight ?? product.weight,
+      expiryDate: expiryDate ?? product.expiryDate,
+      price: price ?? product.price,
+      category: category ?? product.category,
+      image: webUrl,
+    });
 
     await product.save();
     res.json({ message: "Product updated successfully", product });
@@ -131,21 +140,25 @@ export const updateProduct = async (req, res) => {
   }
 };
 
-// Delete
+/**
+ * 🟢  DELETE product + image cleanup + decrement counter
+ */
 export const deleteProduct = async (req, res) => {
   try {
-    const product = await Product.findOneAndDelete({ _id: req.params.id, user: req.user._id });
+    const product = await Product.findOneAndDelete({
+      _id: req.params.id,
+      user: req.user._id,
+    });
     if (!product) return res.status(404).json({ message: "Product not found" });
 
-    // (Optional) Delete image file from server when product is deleted
-    if (product.image && !product.image.startsWith("http")) {
-        fs.unlink(product.image, (err) => {
-           if(err) console.log("Failed to delete product image:", err);
-        });
+    // Remove old local file
+    if (product.image && product.image.includes("/uploads/")) {
+      const fileName = product.image.split("/uploads/")[1];
+      const filePath = path.join(process.cwd(), "uploads", fileName);
+      fs.unlink(filePath, () => {});
     }
 
-    const currentCount = req.user.productCount || 0;
-    req.user.productCount = Math.max(0, currentCount - 1);
+    req.user.productCount = Math.max(0, (req.user.productCount || 0) - 1);
     await req.user.save();
 
     res.json({ message: "Product deleted successfully" });
