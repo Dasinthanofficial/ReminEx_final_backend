@@ -1,4 +1,3 @@
-// src/utils/getImageUrl.js
 export const getImageUrl = (url) => {
   if (!url) return "";
 
