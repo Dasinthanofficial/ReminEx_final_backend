@@ -2,7 +2,8 @@ import express from "express";
 import { 
   getAdminDashboard, 
   getAllUsers, 
-  deleteUser 
+  deleteUser,
+  sendPromotionEmail // 👈 Import the new function
 } from "../controllers/adminController.js";
 import { protect, adminOnly } from "../middleware/authMiddleware.js";
 import { validateMonthYear, validateMongoId } from "../middleware/validators.js";
@@ -19,7 +20,10 @@ router.get("/users", protect, adminOnly, getAllUsers);
 
 // ✅ Delete a User
 // DELETE /api/admin/users/:id
-// We use validateMongoId to ensure the ID passed is valid format
 router.delete("/users/:id", protect, adminOnly, validateMongoId, deleteUser);
+
+// ✅ Send Promotion Email to All Users
+// POST /api/admin/promote
+router.post("/promote", protect, adminOnly, sendPromotionEmail); // 👈 Added route
 
 export default router;
