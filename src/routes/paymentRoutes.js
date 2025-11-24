@@ -1,16 +1,20 @@
 import express from "express";
-import { createCheckoutSession, stripeWebhook, verifyPayment } from "../controllers/paymentController.js";
+import {
+  createCheckoutSession,
+  cancelSubscription,
+  verifyPayment,
+  stripeWebhook
+} from "../controllers/paymentController.js";
 import { protect } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// ✅ Checkout session (protected - user must be logged in)
+// Webhook MUST use raw body (correct location)
+router.post("/webhook", express.raw({ type: "application/json" }), stripeWebhook);
+
+// User payment routes (JSON body)
 router.post("/checkout", protect, createCheckoutSession);
-
-// ✅ Verify payment (protected)
 router.get("/verify", protect, verifyPayment);
-
-// ✅ Webhook route (NO auth, NO express.json - raw body already handled in server.js)
-router.post("/webhook", stripeWebhook);
+router.post("/cancel", protect, cancelSubscription);
 
 export default router;
