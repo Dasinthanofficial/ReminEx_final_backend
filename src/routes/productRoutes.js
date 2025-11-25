@@ -9,10 +9,13 @@ import {
 } from "../controllers/productController.js";
 import {
   getRecipeSuggestion,
-  translateText,          // 🟢 import translateText
+  translateText,
 } from "../controllers/geminiController.js";
-import { protect } from "../middleware/authMiddleware.js";
-import { checkPlanExpiry, requirePremium } from "../middleware/checkPlanExpiry.js";
+import {
+  protect,
+  checkPlanExpiry,
+  requirePremium,
+} from "../middleware/authMiddleware.js";
 import {
   validateProduct,
   validateProductUpdate,
@@ -28,7 +31,7 @@ router.use(protect, checkPlanExpiry);
 // AI: recipe suggestions (premium users only)
 router.post("/recipe", requirePremium, getRecipeSuggestion);
 
-// 🟢 AI: translate recipe text (you can keep this free or add requirePremium)
+// AI: translate recipe text (can be free or also requirePremium if you want)
 router.post("/translate", translateText);
 
 // ✅ Get products
@@ -40,7 +43,7 @@ router.get("/:id", validateMongoId, getProduct);
 // ✅ Add product (supports image file or URL)
 router.post(
   "/",
-  upload.single("image"),   // field name must match frontend FormData key
+  upload.single("image"), // field name must match frontend FormData key
   validateProduct,
   addProduct
 );

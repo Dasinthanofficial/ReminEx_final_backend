@@ -9,13 +9,12 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 export const googleSignIn = async (req, res) => {
   try {
-    const { idToken } = req.body; // token from frontend Google sign-in
+    const { idToken } = req.body;
 
     if (!idToken) {
       return res.status(400).json({ message: "idToken is required" });
     }
 
-    // Verify token with Google
     const ticket = await client.verifyIdToken({
       idToken,
       audience: process.env.GOOGLE_CLIENT_ID,
@@ -30,17 +29,16 @@ export const googleSignIn = async (req, res) => {
       return res.status(400).json({ message: "Google account has no email" });
     }
 
-    // Find existing user by email, or create one
     let user = await User.findOne({ email });
 
     if (!user) {
-      // Create user with random password (user will login via Google)
       user = await User.create({
         name,
         email,
-        password: Math.random().toString(36).slice(-12) + "Aa1", // will be hashed
+        password: Math.random().toString(36).slice(-12) + "Aa1",
         role: "user",
-        // you can add a field like googleId: payload.sub if you want
+        provider: "google",       // 👈 set provider
+        googleId: payload.sub,    // 👈 set googleId
       });
       console.log(`✅ New Google user created: ${email}`);
     } else {

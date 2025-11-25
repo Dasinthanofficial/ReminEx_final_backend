@@ -3,10 +3,14 @@ import User from "../models/User.js";
 import mongoose from "mongoose";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const uploadsDir = path.join(__dirname, "../uploads");
 
 /**
  * GET /api/user/dashboard
- * Fetch user details and recent products
  */
 export const getUserDashboard = async (req, res) => {
   try {
@@ -19,7 +23,7 @@ export const getUserDashboard = async (req, res) => {
       id: user._id,
       name: user.name,
       email: user.email,
-      role: user.role, // ✅ Include role to fix Admin refresh redirect issues
+      role: user.role,
       avatar: user.avatar || "/uploads/default_avatar.png",
       plan: user.plan,
       planExpiry: user.planExpiry,
@@ -35,11 +39,10 @@ export const getUserDashboard = async (req, res) => {
 /**
  * GET /api/user/reports?month=&year=
  * Premium users only
- * Calculates waste for a given month ONLY if the item has actually expired.
+ * Counts items as wasted only if expiry date is BEFORE today (calendar day).
  */
 export const getUserMonthlyReport = async (req, res) => {
   try {
-    // 1. Check Premium Access
     if (!["Monthly", "Yearly"].includes(req.user.plan)) {
       return res
         .status(403)
@@ -49,20 +52,23 @@ export const getUserMonthlyReport = async (req, res) => {
     const now = new Date();
     const month = parseInt(req.query.month) || now.getMonth() + 1;
     const year = parseInt(req.query.year) || now.getFullYear();
-    
-    // Calculate Start and End of the selected month
+
     const start = new Date(year, month - 1, 1);
     const end = new Date(year, month, 0, 23, 59, 59, 999);
 
-    // 2. Aggregate Query
+    // Start of today (local calendar day)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     const agg = await Product.aggregate([
       {
         $match: {
           user: new mongoose.Types.ObjectId(req.user._id),
-          $and: [
-            { expiryDate: { $gte: start, $lte: end } }, // Condition 1: Expiry falls in this month
-            { expiryDate: { $lt: now } }                // Condition 2: Date must be in the past (Expired)
-          ]
+          expiryDate: {
+            $gte: start,
+            $lte: end,
+            $lt: today, // 👈 only dates BEFORE today are counted as wasted
+          },
         },
       },
       {
@@ -86,7 +92,6 @@ export const getUserMonthlyReport = async (req, res) => {
 
 /**
  * PUT /api/user/profile
- * Update user name and/or avatar upload
  */
 export const updateUserProfile = async (req, res) => {
   try {
@@ -94,32 +99,28 @@ export const updateUserProfile = async (req, res) => {
     const { name } = req.body;
     let avatarPath = user.avatar;
 
-    /* 1️⃣ Handle new uploaded file */
     if (req.file) {
-      // Multer stores the file in /uploads/
       const filename = req.file.filename;
       avatarPath = `/uploads/${filename}`;
 
-      // Delete old avatar if it’s a local upload (and not default)
       if (
-        user.avatar && 
-        user.avatar.includes("/uploads/") && 
+        user.avatar &&
+        user.avatar.includes("/uploads/") &&
         !user.avatar.includes("default")
       ) {
         const oldFile = user.avatar.split("/uploads/")[1];
-        const oldPath = path.join(process.cwd(), "uploads", oldFile);
-        
-        // Use async unlink with callback to prevent crashing if file missing
-        fs.unlink(oldPath, (err) => {
-          if (err) console.log("Note: Could not delete old avatar:", err.message);
-        });
+        if (oldFile) {
+          const oldPath = path.join(uploadsDir, oldFile);
+          fs.unlink(oldPath, (err) => {
+            if (err)
+              console.log("Note: Could not delete old avatar:", err.message);
+          });
+        }
       }
     } else if (req.body.avatar && req.body.avatar.startsWith("http")) {
-      // Optional: allow setting an external URL directly
       avatarPath = req.body.avatar;
     }
 
-    /* 2️⃣ Update fields */
     if (name) user.name = name;
     user.avatar = avatarPath;
 
