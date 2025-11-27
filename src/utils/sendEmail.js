@@ -18,7 +18,7 @@ const sendEmail = async (to, subject, text, html = null) => { // 👈 Added html
       to,
       subject,
       text, 
-      html: html || text.replace(/\n/g, "<br>"), L
+      html: html || text.replace(/\n/g, "<br>"), 
     });
     
     console.log(`📧 Email sent to ${to}`);
