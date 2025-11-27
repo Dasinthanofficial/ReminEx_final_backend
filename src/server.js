@@ -1,4 +1,3 @@
-// src/server.js
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -12,7 +11,6 @@ import Product from "./models/Product.js";
 import sendEmail from "./utils/sendEmail.js";
 import { stripeWebhook } from "./controllers/paymentController.js";
 
-// Route modules
 import authRoutes from "./routes/authRoutes.js";
 import productRoutes from "./routes/productRoutes.js";
 import userRoutes from "./routes/userRoutes.js";

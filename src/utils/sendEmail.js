@@ -14,11 +14,11 @@ const sendEmail = async (to, subject, text, html = null) => { // 👈 Added html
     });
 
     await transporter.sendMail({
-      from: `"Food Expiry Tracker" <${process.env.EMAIL_USER}>`,
+      from: `"ReminEX" <${process.env.EMAIL_USER}>`,
       to,
       subject,
-      text, // Fallback for old email clients
-      html: html || text.replace(/\n/g, "<br>"), // 👈 Use HTML if provided, else convert text to HTML
+      text, 
+      html: html || text.replace(/\n/g, "<br>"), L
     });
     
     console.log(`📧 Email sent to ${to}`);

@@ -9,8 +9,6 @@ import { protect } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// ❌ REMOVE webhook here. It is now in server.js with express.raw.
-// router.post("/webhook", express.raw({ type: "application/json" }), stripeWebhook);
 
 // User payment routes (JSON body)
 router.post("/checkout", protect, createCheckoutSession);

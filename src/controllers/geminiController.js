@@ -1,4 +1,3 @@
-// src/controllers/geminiController.js
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import Product from "../models/Product.js";
 
