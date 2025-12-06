@@ -1,4 +1,3 @@
-// src/models/WebhookLog.js
 import mongoose from "mongoose";
 
 const webhookLogSchema = new mongoose.Schema({

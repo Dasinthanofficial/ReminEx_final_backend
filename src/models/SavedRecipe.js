@@ -1,4 +1,3 @@
-// src/models/SavedRecipe.js
 import mongoose from "mongoose";
 
 const savedRecipeSchema = new mongoose.Schema(
