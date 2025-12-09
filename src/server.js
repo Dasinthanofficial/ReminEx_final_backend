@@ -168,3 +168,4 @@ app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log("📅 Daily cron job scheduled at midnight");
 });
+

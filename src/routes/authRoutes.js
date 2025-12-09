@@ -26,3 +26,4 @@ router.post("/reset-password",  validateResetPassword, resetPassword);
 router.post("/google", googleSignIn);
 
 export default router;
+

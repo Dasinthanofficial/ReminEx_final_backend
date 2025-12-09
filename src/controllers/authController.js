@@ -1,6 +1,6 @@
 import User from "../models/User.js";
 import generateToken from "../utils/generateToken.js";
-import sendEmail from "../utils/sendEmail.js";
+
 import crypto from "crypto";
 import dotenv from "dotenv";
 
@@ -136,3 +136,4 @@ export const resetPassword = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
