@@ -194,17 +194,25 @@
 //   }
 // };
 
-
+// src/controllers/productController.js
 import Product from "../models/Product.js";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import cloudinary from "../config/cloudinary.js";
 
-// Resolve uploads directory (same as server.js / uploadMiddleware.js)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const uploadsDir = path.join(__dirname, "../uploads");
+/**
+ * Helper: upload a buffer to Cloudinary
+ */
+const uploadBufferToCloudinary = (buffer, folder) => {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder },
+      (err, result) => {
+        if (err) return reject(err);
+        resolve(result);
+      }
+    );
+    stream.end(buffer);
+  });
+};
 
 /**
  * 🟢  GET all products for current user
@@ -255,7 +263,6 @@ export const addProduct = async (req, res) => {
     // Enforce Free-plan product limit
     const currentCount = req.user.productCount || 0;
     if (req.user.plan === "Free" && currentCount >= 5) {
-      if (req.file) fs.unlink(req.file.path, () => {});
       return res.status(403).json({
         message: "Free plan allows only 5 products. Upgrade to Premium.",
         currentCount,
@@ -266,16 +273,12 @@ export const addProduct = async (req, res) => {
     // Handle image: URL or upload to Cloudinary
     let imagePath = req.body.image || "";
 
-    if (req.file) {
-      // Upload file from local temp path to Cloudinary
-      const uploadResult = await cloudinary.uploader.upload(req.file.path, {
-        folder: "reminex/products",
-      });
-
+    if (req.file && req.file.buffer) {
+      const uploadResult = await uploadBufferToCloudinary(
+        req.file.buffer,
+        "reminex/products"
+      );
       imagePath = uploadResult.secure_url;
-
-      // Remove local temp file
-      fs.unlink(req.file.path, () => {});
     }
 
     const product = await Product.create({
@@ -319,24 +322,12 @@ export const updateProduct = async (req, res) => {
 
     let imagePath = product.image;
 
-    if (req.file) {
-      // If old image was a local `/uploads` file, clean it up
-      if (product.image && product.image.includes("/uploads/")) {
-        const oldFile = product.image.split("/uploads/")[1];
-        if (oldFile) {
-          const deletePath = path.join(uploadsDir, oldFile);
-          fs.unlink(deletePath, () => {});
-        }
-      }
-
-      // Upload new image to Cloudinary
-      const uploadResult = await cloudinary.uploader.upload(req.file.path, {
-        folder: "reminex/products",
-      });
+    if (req.file && req.file.buffer) {
+      const uploadResult = await uploadBufferToCloudinary(
+        req.file.buffer,
+        "reminex/products"
+      );
       imagePath = uploadResult.secure_url;
-
-      // Remove local temp file
-      fs.unlink(req.file.path, () => {});
     } else if (req.body.image) {
       // Direct URL from client
       imagePath = req.body.image;
@@ -361,8 +352,8 @@ export const updateProduct = async (req, res) => {
 };
 
 /**
- * 🟢  DELETE product + image cleanup + decrement counter
- * (Cloudinary images are not deleted here; only local `/uploads` files are cleaned)
+ * 🟢  DELETE product + decrement counter
+ * (Images live in Cloudinary; no local file to delete)
  */
 export const deleteProduct = async (req, res) => {
   try {
@@ -372,15 +363,6 @@ export const deleteProduct = async (req, res) => {
     });
     if (!product)
       return res.status(404).json({ message: "Product not found" });
-
-    // Clean up old local image if it was stored under /uploads
-    if (product.image && product.image.includes("/uploads/")) {
-      const fileName = product.image.split("/uploads/")[1];
-      if (fileName) {
-        const filePath = path.join(uploadsDir, fileName);
-        fs.unlink(filePath, () => {});
-      }
-    }
 
     req.user.productCount = Math.max(
       0,

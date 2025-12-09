@@ -144,18 +144,27 @@
 //     res.status(500).json({ message: err.message });
 //   }
 // };
-
+// src/controllers/userController.js
 import Product from "../models/Product.js";
 import User from "../models/User.js";
 import mongoose from "mongoose";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import cloudinary from "../config/cloudinary.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const uploadsDir = path.join(__dirname, "../uploads");
+/**
+ * Helper: upload a buffer to Cloudinary
+ */
+const uploadBufferToCloudinary = (buffer, folder) => {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder },
+      (err, result) => {
+        if (err) return reject(err);
+        resolve(result);
+      }
+    );
+    stream.end(buffer);
+  });
+};
 
 /**
  * GET /api/user/dashboard
@@ -172,7 +181,7 @@ export const getUserDashboard = async (req, res) => {
       name: user.name,
       email: user.email,
       role: user.role,
-      avatar: user.avatar || "/uploads/default_avatar.png",
+      avatar: user.avatar, // default comes from schema (Cloudinary URL)
       plan: user.plan,
       planExpiry: user.planExpiry,
       productCount: user.productCount,
@@ -249,35 +258,12 @@ export const updateUserProfile = async (req, res) => {
     const { name } = req.body;
     let avatarPath = user.avatar;
 
-    if (req.file) {
-      // Upload new avatar to Cloudinary
-      const uploadResult = await cloudinary.uploader.upload(req.file.path, {
-        folder: "reminex/avatars",
-        transformation: { width: 256, height: 256, crop: "fill" },
-      });
+    if (req.file && req.file.buffer) {
+      const uploadResult = await uploadBufferToCloudinary(
+        req.file.buffer,
+        "reminex/avatars"
+      );
       avatarPath = uploadResult.secure_url;
-
-      // Remove local temp file
-      fs.unlink(req.file.path, () => {});
-
-      // Clean up old local avatar if it was under /uploads (legacy)
-      if (
-        user.avatar &&
-        user.avatar.includes("/uploads/") &&
-        !user.avatar.includes("default")
-      ) {
-        const oldFile = user.avatar.split("/uploads/")[1];
-        if (oldFile) {
-          const oldPath = path.join(uploadsDir, oldFile);
-          fs.unlink(oldPath, (err) => {
-            if (err)
-              console.log(
-                "Note: Could not delete old avatar:",
-                err.message
-              );
-          });
-        }
-      }
     } else if (req.body.avatar && req.body.avatar.startsWith("http")) {
       // Allow setting avatar to another remote URL (e.g., Google profile picture)
       avatarPath = req.body.avatar;
