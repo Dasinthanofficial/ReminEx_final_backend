@@ -56,8 +56,8 @@ const cleanRecipeText = (raw) => {
 };
 
 /**
- * Generate short recipes in ENGLISH for ALL Food products for this user
- * that expire within the next 7 days, using DeepSeek via OpenRouter.
+ * Generate short, slightly funny recipes in ENGLISH for ALL Food products
+ * for this user that expire within the next 7 days, using DeepSeek via OpenRouter.
  */
 export const getRecipeSuggestion = async (req, res) => {
   try {
@@ -88,24 +88,39 @@ export const getRecipeSuggestion = async (req, res) => {
 
     // 3️⃣ Generate recipe for each product sequentially
     for (const product of products) {
+      const expStr = new Date(product.expiryDate).toDateString();
+
       const prompt = `
-You are a friendly home‑cook AI.
+You are a fun, friendly home cook helping someone reduce food waste by using ingredients that are close to their expiry date.
 
-Write a short, realistic recipe in English that uses *${product.name}*
-(expiring on ${new Date(product.expiryDate).toDateString()}).
+Write ONE short, realistic recipe in friendly, natural English that uses *${product.name}* as a key ingredient
+(expiring on ${expStr}). Focus on everyday home cooking, not restaurant style.
 
-Format clearly:
+Tone:
+- Light and playful.
+- Add 1–2 small, funny comments in the instructions (e.g. "don't burn it, we want dinner, not charcoal").
+- Do NOT turn it into a long joke or stand-up comedy. Recipe first, jokes second.
 
-🍽️ Dish Name
-🧂 Ingredients (bullet list)
-👨‍🍳 Instructions (numbered steps)
-🕒 Total Time (in minutes)
+Output the recipe using EXACTLY this structure:
 
-Keep the recipe under 150 words and easy for beginners.
+🍽️ Dish Name: <simple, appealing name>
+🧂 Ingredients:
+• <ingredient 1>
+• <ingredient 2>
+• <ingredient 3>
+👨‍🍳 Instructions:
+1. <step 1 with a tiny joke or friendly remark>
+2. <step 2>
+3. <step 3 with a playful note>
+🕒 Total Time: <number> minutes
 
-IMPORTANT:
+Constraints:
+- Under 150 words total.
+- Easy for beginners.
+- Use ingredients that are commonly found in a normal home kitchen.
+- Do NOT mention that the ingredient is expiring soon or talk about being an AI.
 - Do NOT include your reasoning, analysis, or any explanation.
-- Respond ONLY with the final formatted recipe text.
+- Respond ONLY with the final formatted recipe text in the structure above.
 `;
 
       try {
