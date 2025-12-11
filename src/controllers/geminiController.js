@@ -14,7 +14,7 @@ const LANG_CODES = {
   English: "en",
 };
 
-const MAX_QUERY_CHARS = 300; // keep well below MyMemory's 500-char limit
+const MAX_QUERY_CHARS = 300; // safe below MyMemory limit
 
 // Helper: split text into safe-length chunks
 const splitIntoChunks = (text, maxLen = MAX_QUERY_CHARS) => {
@@ -27,66 +27,44 @@ const splitIntoChunks = (text, maxLen = MAX_QUERY_CHARS) => {
   return chunks;
 };
 
-// Helper: strip chain-of-thought / reasoning and keep only the recipe
+// Helper: clean recipe text
 const cleanRecipeText = (raw) => {
   if (!raw) return "";
 
-  const markers = [
-    "🍽️",
-    "Dish Name",
-    "🧂",
-    "Ingredients",
-    "👨‍🍳",
-    "Instructions",
-    "Recipe",
-  ];
-
+  const markers = ["🍽️ Dish Name:", "Dish Name:", "🧂 Ingredients:", "👨‍🍳 Instructions:"];
   let pos = Infinity;
   for (const m of markers) {
-    const i = raw.indexOf(m);
-    if (i !== -1 && i < pos) pos = i;
+    const idx = raw.indexOf(m);
+    if (idx !== -1 && idx < pos) pos = idx;
   }
 
-  if (pos !== Infinity) {
-    return raw.slice(pos).trim();
-  }
-
-  // Fallback: return original if we can't detect markers
-  return raw.trim();
+  return pos !== Infinity ? raw.slice(pos).trim() : raw.trim();
 };
 
 /**
- * Generate short, slightly funny recipes in ENGLISH for ALL Food products
- * for this user that expire within the next 7 days, using DeepSeek via OpenRouter.
+ * Generate short, playful recipes in ENGLISH for all Food products
+ * expiring within 7 days using DeepSeek via OpenRouter.
  */
 export const getRecipeSuggestion = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // 1️⃣ Date window: from now up to 7 days ahead
     const now = new Date();
     const sevenDaysLater = new Date();
     sevenDaysLater.setDate(now.getDate() + 7);
 
-    // 2️⃣ Find ALL Food products in that window (sorted by expiry)
     const products = await Product.find({
       user: userId,
       category: "Food",
       expiryDate: { $gte: now, $lte: sevenDaysLater },
-    })
-      .sort({ expiryDate: 1 })
-      .lean();
+    }).sort({ expiryDate: 1 }).lean();
 
     if (!products.length) {
-      return res.status(404).json({
-        success: false,
-        message: "No food items expiring within 7 days.",
-      });
+      return res.status(404).json({ success: false, message: "No food items expiring within 7 days." });
     }
 
     const output = [];
 
-    // 3️⃣ Generate recipe for each product sequentially
     for (const product of products) {
       const expStr = new Date(product.expiryDate).toDateString();
 
@@ -98,8 +76,8 @@ Write ONE short, realistic recipe in friendly, natural English that uses *${prod
 
 Tone:
 - Light and playful.
-- Add 1–2 small, funny comments in the instructions (e.g. "don't burn it, we want dinner, not charcoal").
-- Do NOT turn it into a long joke or stand-up comedy. Recipe first, jokes second.
+- Add 1–2 small, funny comments in the instructions (e.g., "don't burn it, we want dinner, not charcoal").
+- Recipe first, jokes second.
 
 Output the recipe using EXACTLY this structure:
 
@@ -115,12 +93,13 @@ Output the recipe using EXACTLY this structure:
 🕒 Total Time: <number> minutes
 
 Constraints:
-- Under 150 words total.
+- Under 150 words.
 - Easy for beginners.
-- Use ingredients that are commonly found in a normal home kitchen.
-- Do NOT mention that the ingredient is expiring soon or talk about being an AI.
-- Do NOT include your reasoning, analysis, or any explanation.
-- Respond ONLY with the final formatted recipe text in the structure above.
+- Use common home ingredients.
+- Do NOT mention expiry dates or being AI.
+- Do NOT include reasoning or analysis.
+- Do NOT repeat any example or sample recipes.
+- Respond ONLY with the final recipe in the format above.
 `;
 
       try {
@@ -134,10 +113,7 @@ Constraints:
           recipe: recipeText,
         });
       } catch (err) {
-        console.error(
-          `OpenRouter/DeepSeek failed for ${product.name}:`,
-          err.message
-        );
+        console.error(`OpenRouter failed for ${product.name}:`, err.message);
         output.push({
           id: product._id,
           name: product.name,
@@ -146,8 +122,7 @@ Constraints:
         });
       }
 
-      // Optional small delay to be nicer to rate limits
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 200)); // rate-limit friendly
     }
 
     res.json({
@@ -157,97 +132,58 @@ Constraints:
       message: `Generated ${output.length} recipe(s) for items expiring within 7 days.`,
     });
   } catch (error) {
-    console.error("OpenRouter/DeepSeek Error (recipes):", error);
+    console.error("OpenRouter Error (recipes):", error);
     res.status(500).json({
       success: false,
       message: "Failed to generate recipes.",
-      error:
-        process.env.NODE_ENV === "development" ? error.message : undefined,
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
 
 /**
  * Translate recipe text into a target language using MyMemory API
- * (supports Tamil, Sinhala, etc.; handles long texts by chunking).
  */
 export const translateText = async (req, res) => {
   try {
     const { text, targetLang } = req.body;
 
     if (!text || !targetLang) {
-      return res.status(400).json({
-        success: false,
-        message: "text and targetLang are required",
-      });
+      return res.status(400).json({ success: false, message: "text and targetLang are required" });
     }
 
-    // If asking for English, just return original text
-    if (targetLang === "English") {
-      return res.json({ success: true, translated: text });
-    }
+    if (targetLang === "English") return res.json({ success: true, translated: text });
 
     const targetCode = LANG_CODES[targetLang];
-    if (!targetCode) {
-      return res.status(400).json({
-        success: false,
-        message: `Unsupported target language: ${targetLang}`,
-      });
-    }
+    if (!targetCode) return res.status(400).json({ success: false, message: `Unsupported target language: ${targetLang}` });
 
     const langpair = `en|${targetCode}`;
-
-    // 1️⃣ Split text into safe-length chunks
     const chunks = splitIntoChunks(text);
-
     const translatedChunks = [];
 
-    // 2️⃣ Translate each chunk sequentially
     for (const chunk of chunks) {
-      const response = await axios.get(
-        "https://api.mymemory.translated.net/get",
-        {
-          params: { q: chunk, langpair },
-          timeout: 20000,
-        }
-      );
+      const response = await axios.get("https://api.mymemory.translated.net/get", {
+        params: { q: chunk, langpair },
+        timeout: 20000,
+      });
 
-      const data = response.data;
-      const translatedPart = data?.responseData?.translatedText || null;
-
+      const translatedPart = response.data?.responseData?.translatedText;
       if (!translatedPart) {
-        console.error(
-          "MyMemory response without translatedText for chunk:",
-          data
-        );
-        return res.status(500).json({
-          success: false,
-          message: "Translation API returned no result for a chunk",
-        });
+        console.error("MyMemory missing translatedText:", response.data);
+        return res.status(500).json({ success: false, message: "Translation API returned no result for a chunk" });
       }
 
       translatedChunks.push(translatedPart);
-
-      // Optional: small delay to be nice to the free API
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 200)); // polite delay
     }
 
-    // 3️⃣ Join all translated chunks back into one string
-    const translated = translatedChunks.join("");
-
-    res.json({ success: true, translated });
+    res.json({ success: true, translated: translatedChunks.join("") });
   } catch (error) {
-    console.error("MyMemory translate error:", {
-      message: error.message,
-      code: error.code,
-      response: error.response?.data,
-    });
-
+    console.error("MyMemory translate error:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to translate (external API error)",
-      error:
-        process.env.NODE_ENV === "development" ? error.message : undefined,
+      message: "Failed to translate",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
