@@ -145,6 +145,8 @@
 //   }
 // };
 // src/controllers/userController.js
+
+
 import Product from "../models/Product.js";
 import User from "../models/User.js";
 import mongoose from "mongoose";
