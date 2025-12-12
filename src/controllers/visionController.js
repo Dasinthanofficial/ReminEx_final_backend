@@ -4,7 +4,7 @@ import { askVisionModel } from "../utils/hfVisionClient.js";
 /**
  * POST /api/products/predict-image
  * Form-data: image (file)
- * Uses HF vision model to guess condition & days until spoilage.
+ * Uses HF vision model to caption the image, then heuristics to guess condition & days.
  */
 export const predictSpoilageFromImage = async (req, res) => {
   try {
@@ -14,58 +14,44 @@ export const predictSpoilageFromImage = async (req, res) => {
         .json({ success: false, message: "No image uploaded" });
     }
 
-    const prompt = `
-You see a photo of fresh produce (fruits or vegetables).
+    // 1️⃣ Get caption from HF vision model
+    const caption = await askVisionModel(req.file.buffer);
+    console.log("Caption from HF vision model:", caption);
 
-Task:
-1. Judge the visible condition as one of:
-   - "fresh"
-   - "slightly damaged"
-   - "rotting"
-   - "unsafe"
-2. Estimate in how many whole days from today it will likely NOT be good to eat,
-   assuming typical home storage.
-3. Return ONLY a JSON object in exactly this format:
-
-{
-  "condition": "fresh" | "slightly damaged" | "rotting" | "unsafe",
-  "days": <integer between 0 and 14>,
-  "notes": "<very short explanation in one sentence>"
-}
-
-Do not include any extra text outside of the JSON.
-`;
-
-    const raw = await askVisionModel(prompt, req.file.buffer);
+    // 2️⃣ Simple heuristic based on caption text
+    const lower = caption.toLowerCase();
 
     let condition = "fresh";
-    let days = 3;
-    let notes = "";
+    let days = 5;
 
-    try {
-      const parsed = JSON.parse(raw);
-      if (typeof parsed.condition === "string") {
-        condition = parsed.condition;
-      }
-      if (
-        typeof parsed.days === "number" &&
-        parsed.days >= 0 &&
-        parsed.days <= 14
-      ) {
-        days = Math.round(parsed.days);
-      }
-      if (typeof parsed.notes === "string") {
-        notes = parsed.notes;
-      }
-    } catch (err) {
-      console.error(
-        "predictSpoilageFromImage: JSON parse error:",
-        err.message,
-        "raw:",
-        raw
-      );
+    // Very rough rules:
+    if (
+      lower.includes("mold") ||
+      lower.includes("mould") ||
+      lower.includes("rotten") ||
+      lower.includes("rot") ||
+      lower.includes("decay") ||
+      lower.includes("spoiled") ||
+      lower.includes("bad")
+    ) {
+      condition = "rotting";
+      days = 0; // basically unsafe now
+    } else if (
+      lower.includes("brown") ||
+      lower.includes("spot") ||
+      lower.includes("bruise") ||
+      lower.includes("soft") ||
+      lower.includes("damaged") ||
+      lower.includes("blemish")
+    ) {
+      condition = "slightly damaged";
+      days = 2; // use soon
+    } else {
+      condition = "fresh";
+      days = 5; // default for good-looking produce
     }
 
+    // 3️⃣ Compute expiry date: today + days
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const expiryDate = new Date(today);
@@ -75,7 +61,7 @@ Do not include any extra text outside of the JSON.
       success: true,
       condition,
       days,
-      notes,
+      notes: caption, // show caption as note
       expiryDate,
       expiryDateISO: expiryDate.toISOString().slice(0, 10),
     });
