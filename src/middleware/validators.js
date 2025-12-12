@@ -1,8 +1,5 @@
 import { body, param, query, validationResult } from "express-validator";
 
-/* ======================================================
-   Central validation handler
-   ====================================================== */
 export const validate = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -26,9 +23,6 @@ export const validate = (req, res, next) => {
   next();
 };
 
-/* ======================================================
-   AUTHENTICATION VALIDATORS 
-   ====================================================== */
 export const validateRegister = [
   body("name")
     .trim()
@@ -89,9 +83,7 @@ export const validateResetPassword = [
   validate,
 ];
 
-/* ======================================================
-   PRODUCT VALIDATORS 
-   ====================================================== */
+
 export const validateProduct = [
   body("name")
     .trim()
@@ -115,8 +107,8 @@ export const validateProduct = [
   body("image")
     .optional({ checkFalsy: true })
     .custom((value, { req }) => {
-      if (req.file) return true;           // file uploaded via Multer
-      if (!value) return true;             // empty allowed
+      if (req.file) return true;           
+      if (!value) return true;             
       try {
         new URL(value);
         return true;
@@ -151,9 +143,7 @@ export const validateProductUpdate = [
   validate,
 ];
 
-/* ======================================================
-   PLAN / ADVERT / GENERAL VALIDATORS (unchanged)
-   ====================================================== */
+
 export const validatePlan = [
   body("name")
     .trim()

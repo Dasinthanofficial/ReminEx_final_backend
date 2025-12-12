@@ -1,14 +1,10 @@
 import multer from "multer";
 import path from "path";
 
-// ------------------------------------------------------------------
-// Multer storage configuration: MEMORY storage (no disk/uploads folder)
-// ------------------------------------------------------------------
+
 const storage = multer.memoryStorage();
 
-// ------------------------------------------------------------------
-// File‑type filter (allow only common image types)
-// ------------------------------------------------------------------
+
 const checkFileType = (file, cb) => {
   const filetypes = /jpeg|jpg|png|webp/;
   const extname = filetypes.test(

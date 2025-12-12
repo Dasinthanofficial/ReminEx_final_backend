@@ -1,18 +1,15 @@
 import axios from "axios";
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-// Recommended: a normal chat model, not a reasoning model
-// If you insist on Chimera, set this to "tng/deepseek-r1t-chimera-free"
+
+
 const OPENROUTER_MODEL =
   process.env.OPENROUTER_MODEL || "deepseek/deepseek-chat";
 
 const OPENROUTER_REFERRER =
   process.env.OPENROUTER_REFERRER || "https://your-frontend-url.com";
 
-/**
- * Call DeepSeek via OpenRouter with a simple chat prompt.
- * Ensures: no chain-of-thought in final answer, enough tokens for full recipe.
- */
+
 export const callOpenRouter = async (prompt) => {
   if (!OPENROUTER_API_KEY) {
     throw new Error("OPENROUTER_API_KEY is not set");

@@ -5,7 +5,7 @@ const productSchema = new mongoose.Schema({
   name: { type: String, required: true },
   category: { type: String, enum: ["Food", "Non-Food"], required: true },
   
-  weight: Number, // Stores the amount (e.g., 500)
+  weight: Number, 
   unit: { type: String, default: "g" }, // Stores the unit (e.g., "ml", "L", "kg")
 
   price: Number,

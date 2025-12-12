@@ -1,6 +1,6 @@
 import User from "../models/User.js";
 import generateToken from "../utils/generateToken.js";
-import sendEmail from "../utils/sendEmail.js"; // ✅ added
+import sendEmail from "../utils/sendEmail.js"; 
 
 import crypto from "crypto";
 import dotenv from "dotenv";

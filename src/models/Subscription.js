@@ -13,8 +13,8 @@ const subscriptionSchema = new mongoose.Schema(
     },
     startDate: { type: Date, default: Date.now },
     endDate: Date,
-    providerId: String,     // Stripe checkout session id
-    subscriptionId: String, // Stripe subscription id (sub_xxx)
+    providerId: String,     
+    subscriptionId: String, 
   },
   { timestamps: true }
 );
