@@ -82,8 +82,6 @@
 // export default router;
 
 
-
-// backend/src/routes/productRoutes.js
 import express from "express";
 import {
   getProducts,
@@ -114,7 +112,7 @@ import {
 } from "../controllers/recipeController.js";
 import {
   scanProductByBarcode,
-  scanLabelImage,          // ✅ import enabled
+  // scanLabelImage, // removed label OCR
 } from "../controllers/scanController.js";
 
 const router = express.Router();
@@ -136,8 +134,7 @@ router.delete("/recipes/:id", deleteSavedRecipe);
 // 🔎 Scan product by barcode (Open Food Facts)
 router.get("/scan/barcode/:code", scanProductByBarcode);
 
-// 🔎 Scan label image for expiry/weight (OCR)
-router.post("/scan/label", upload.single("image"), scanLabelImage);  // ✅ enabled
+// 🔎 (Label OCR removed) – no /scan/label route
 
 // ✅ Get products
 router.get("/", getProducts);
