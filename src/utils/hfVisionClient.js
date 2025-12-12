@@ -2,8 +2,11 @@
 import { HfInference } from "@huggingface/inference";
 
 const HF_TOKEN = process.env.HF_API_TOKEN;
+
+// Default to a captioning model that supports image-to-text.
+// You can override with HF_VISION_MODEL in .env if you know another model supports image-to-text.
 const HF_VISION_MODEL =
-  process.env.HF_VISION_MODEL || "llava-hf/llava-v1.6-vicuna-7b-hf";
+  process.env.HF_VISION_MODEL || "nlpconnect/vit-gpt2-image-captioning";
 
 if (!HF_TOKEN) {
   console.warn(
@@ -14,22 +17,36 @@ if (!HF_TOKEN) {
 const hf = new HfInference(HF_TOKEN);
 
 /**
- * Call a vision-language model with an image and get a textual answer.
- * For LLaVA, we use the imageToText pipeline.
+ * Call a vision-language model with an image and get a textual answer (caption).
+ * Uses the imageToText pipeline with Hugging Face's own inference provider.
  */
 export const askVisionModel = async (prompt, imageBuffer) => {
-  const result = await hf.imageToText({
-    model: HF_VISION_MODEL,
-    data: imageBuffer,
-    // some models accept a prompt/parameters; for llava, we can prepend the prompt
-    // or rely on default prompt behavior. To enforce prompt, we embed it in the
-    // query: "PROMPT: ...".
-    // The result.text will be the model's answer.
-  });
+  try {
+    const result = await hf.imageToText({
+      model: HF_VISION_MODEL,
+      data: imageBuffer,
+      provider: "hf-inference", // 👈 force HF provider instead of auto-selecting hyperbolic
+    });
 
-  // result is typically: { generated_text: "..." } or { text: "..." }
-  const text =
-    result.generated_text || result.text || result[0]?.generated_text || "";
-  if (!text) throw new Error("No text returned from vision model");
-  return text.trim();
+    // result is usually an object like { generated_text: "..." }
+    // but we handle several shapes just in case
+    const text =
+      result.generated_text ||
+      result.text ||
+      (Array.isArray(result) && result[0]?.generated_text) ||
+      "";
+
+    if (!text) {
+      throw new Error("No text returned from vision model");
+    }
+
+    return text.trim();
+  } catch (error) {
+    console.error(
+      "HF vision API error:",
+      error.response?.status,
+      error.response?.data || error.message
+    );
+    throw error;
+  }
 };
