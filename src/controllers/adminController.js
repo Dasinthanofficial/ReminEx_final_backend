@@ -1,21 +1,36 @@
+// backend/src/controllers/adminController.js
+
 import Product from "../models/Product.js";
 import User from "../models/User.js";
 import Subscription from "../models/Subscription.js";
 import sendEmail from "../utils/sendEmail.js";
+import { startOfLocalDay, monthRangeLocal } from "../utils/dates.js";
+import cloudinary from "../config/cloudinary.js";
+
+/**
+ * Helper: upload a buffer to Cloudinary
+ */
+const uploadBufferToCloudinary = (buffer, folder) => {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream({ folder }, (err, result) => {
+      if (err) return reject(err);
+      resolve(result);
+    });
+    stream.end(buffer);
+  });
+};
 
 // ✅ Admin Dashboard Stats - calendar-based waste calculation
 export const getAdminDashboard = async (req, res) => {
   try {
     const now = new Date();
-    const month = parseInt(req.query.month) || now.getMonth() + 1;
-    const year = parseInt(req.query.year) || now.getFullYear();
+    const month = parseInt(req.query.month, 10) || now.getMonth() + 1;
+    const year = parseInt(req.query.year, 10) || now.getFullYear();
 
-    const start = new Date(year, month - 1, 1);
-    const end = new Date(year, month, 0, 23, 59, 59, 999);
+    const { start, end } = monthRangeLocal(year, month);
 
-    // Start of TODAY (calendar date)
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Start of TODAY (local calendar day)
+    const today = startOfLocalDay();
 
     // Basic Counts
     const totalUsers = await User.countDocuments();
@@ -23,15 +38,14 @@ export const getAdminDashboard = async (req, res) => {
       plan: { $in: ["Monthly", "Yearly"] },
     });
 
-    // 1️⃣ Total waste (all categories, only expired in selected month)
-    // "Expired" means expiryDate is BEFORE today (calendar day)
+    // 1️⃣ Total waste (only expired in selected month)
     const wasteAgg = await Product.aggregate([
       {
         $match: {
           expiryDate: {
             $gte: start,
             $lte: end,
-            $lt: today, // 👈 only dates strictly before today
+            $lt: today,
           },
         },
       },
@@ -47,15 +61,11 @@ export const getAdminDashboard = async (req, res) => {
     const totalWaste = wasteAgg[0]?.totalWaste || 0;
     const wastedCount = wasteAgg[0]?.count || 0;
 
-    // 2️⃣ Waste by category (Food vs Non-Food) using the same rule
+    // 2️⃣ Waste by category (Food vs Non-Food)
     const wasteByCatAgg = await Product.aggregate([
       {
         $match: {
-          expiryDate: {
-            $gte: start,
-            $lte: end,
-            $lt: today,
-          },
+          expiryDate: { $gte: start, $lte: end, $lt: today },
         },
       },
       {
@@ -68,20 +78,17 @@ export const getAdminDashboard = async (req, res) => {
 
     const wasteByCategory = { food: 0, nonFood: 0 };
     for (const row of wasteByCatAgg) {
-      if (row._id === "Food") {
-        wasteByCategory.food = row.totalWaste;
-      } else if (row._id === "Non-Food") {
-        wasteByCategory.nonFood = row.totalWaste;
-      }
+      if (row._id === "Food") wasteByCategory.food = row.totalWaste;
+      if (row._id === "Non-Food") wasteByCategory.nonFood = row.totalWaste;
     }
 
-    // 3️⃣ Revenue for the specific month (USD only to avoid mixing currencies)
+    // 3️⃣ Revenue for the specific month (USD only)
     const revenueAgg = await Subscription.aggregate([
       {
         $match: {
           createdAt: { $gte: start, $lte: end },
           status: "active",
-          currency: "USD", // 👈 only include USD amounts in totalRevenue
+          currency: "USD",
         },
       },
       {
@@ -91,6 +98,7 @@ export const getAdminDashboard = async (req, res) => {
         },
       },
     ]);
+
     const totalRevenue = revenueAgg[0]?.totalRevenue || 0;
 
     const stats = {
@@ -104,15 +112,12 @@ export const getAdminDashboard = async (req, res) => {
       wasteByCategory,
       debug: {
         queryRange: `${start.toDateString()} to ${end.toDateString()}`,
-        currentDate: now.toDateString(),
-        monthName: start.toLocaleString("default", {
-          month: "long",
-          year: "numeric",
-        }),
+        today: today.toDateString(),
+        currentDateTime: now.toString(),
+        monthName: start.toLocaleString("default", { month: "long", year: "numeric" }),
       },
     };
 
-    console.log("📊 Admin Dashboard Stats:", stats);
     res.json(stats);
   } catch (err) {
     console.error("❌ Admin Dashboard Error:", err);
@@ -123,7 +128,7 @@ export const getAdminDashboard = async (req, res) => {
   }
 };
 
-// ✅ Get All Users (For Admin Users Page) - ENHANCED
+// ✅ Get All Users
 export const getAllUsers = async (req, res) => {
   try {
     const users = await User.aggregate([
@@ -177,7 +182,7 @@ export const getAllUsers = async (req, res) => {
   }
 };
 
-// ✅ Delete a User (For Admin Users Page) - ENHANCED
+// ✅ Delete a User
 export const deleteUser = async (req, res) => {
   try {
     const userToDelete = await User.findById(req.params.id);
@@ -188,9 +193,7 @@ export const deleteUser = async (req, res) => {
 
     // Prevent Admin from deleting themselves
     if (userToDelete._id.toString() === req.user._id.toString()) {
-      return res
-        .status(400)
-        .json({ message: "You cannot delete your own admin account" });
+      return res.status(400).json({ message: "You cannot delete your own admin account" });
     }
 
     // Prevent deleting other admins
@@ -198,20 +201,12 @@ export const deleteUser = async (req, res) => {
       return res.status(403).json({ message: "Cannot delete admin accounts" });
     }
 
-    const productCount = await Product.countDocuments({
-      user: userToDelete._id,
-    });
-    const subscriptionCount = await Subscription.countDocuments({
-      user: userToDelete._id,
-    });
+    const productCount = await Product.countDocuments({ user: userToDelete._id });
+    const subscriptionCount = await Subscription.countDocuments({ user: userToDelete._id });
 
     await Product.deleteMany({ user: userToDelete._id });
     await Subscription.deleteMany({ user: userToDelete._id });
     await User.findByIdAndDelete(req.params.id);
-
-    console.log(
-      `✅ Deleted user ${userToDelete.email} with ${productCount} products and ${subscriptionCount} subscriptions`
-    );
 
     res.json({
       message: "User and their data deleted successfully",
@@ -227,35 +222,24 @@ export const deleteUser = async (req, res) => {
   }
 };
 
-// ✅ Send Promotion Email (Admin Only) - ENHANCED
+// ✅ Send Promotion Email (Admin Only)
 export const sendPromotionEmail = async (req, res) => {
   try {
     const { subject, message, targetAudience = "all" } = req.body;
 
     if (!subject || !message) {
-      return res
-        .status(400)
-        .json({ message: "Subject and message are required" });
+      return res.status(400).json({ message: "Subject and message are required" });
     }
 
     let userQuery = {};
-    if (targetAudience === "free") {
-      userQuery = { plan: "Free" };
-    } else if (targetAudience === "premium") {
-      userQuery = { plan: { $in: ["Monthly", "Yearly"] } };
-    }
+    if (targetAudience === "free") userQuery = { plan: "Free" };
+    if (targetAudience === "premium") userQuery = { plan: { $in: ["Monthly", "Yearly"] } };
 
     const users = await User.find(userQuery).select("email name plan");
 
     if (!users.length) {
-      return res
-        .status(404)
-        .json({ message: "No users found for selected audience" });
+      return res.status(404).json({ message: "No users found for selected audience" });
     }
-
-    console.log(
-      `📧 Sending promotion to ${users.length} ${targetAudience} users...`
-    );
 
     let sentCount = 0;
     let failedCount = 0;
@@ -264,13 +248,14 @@ export const sendPromotionEmail = async (req, res) => {
     (async () => {
       for (const user of users) {
         try {
+          // message is HTML from ReactQuill; keep as-is for HTML email.
           const personalizedHtml = `
             <!DOCTYPE html>
             <html>
             <head>
               <meta charset="UTF-8">
               <style>
-                body { margin: 0; padding: 0; font-family: 'Arial', sans-serif; }
+                body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
                 .container { max-width: 600px; margin: 0 auto; background-color: #f4f4f4; }
                 .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; }
                 .logo { color: white; font-size: 28px; font-weight: bold; text-decoration: none; }
@@ -283,52 +268,44 @@ export const sendPromotionEmail = async (req, res) => {
             <body>
               <div class="container">
                 <div class="header">
-                  <a href="${process.env.CLIENT_URL}" class="logo">🍎 ReminEx</a>
+                  <a href="${process.env.CLIENT_URL}" class="logo">ReminEx</a>
                 </div>
                 <div class="content">
-                  <h2>Hi ${user.name}! 👋</h2>
+                  <h2>Hi ${user.name}!</h2>
                   <div style="font-size: 16px; color: #333; line-height: 1.6;">
-                    ${message.replace(/\n/g, "<br>")}
+                    ${message}
                   </div>
                   ${
                     user.plan === "Free"
-                      ? `
-                    <a href="${process.env.CLIENT_URL}/plans" class="button">Upgrade to Premium</a>
-                  `
+                      ? `<a href="${process.env.CLIENT_URL}/plans" class="button">Upgrade to Premium</a>`
                       : ""
                   }
                 </div>
                 <div class="footer">
-                  <p>You received this email because you are a ${
-                    user.plan
-                  } member of ReminEx.</p>
-                  <p><a href="${
-                    process.env.CLIENT_URL
-                  }/unsubscribe" class="unsubscribe">Unsubscribe from promotional emails</a></p>
+                  <p>You received this email because you are a ${user.plan} member of ReminEx.</p>
+                  <p><a href="${process.env.CLIENT_URL}/unsubscribe" class="unsubscribe">Unsubscribe</a></p>
                 </div>
               </div>
             </body>
             </html>
           `;
 
-          await sendEmail(user.email, subject, message, personalizedHtml);
+          // Plain-text fallback: strip tags
+          const plainText = message.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+          await sendEmail(user.email, subject, plainText, personalizedHtml);
           sentCount++;
-          console.log(`✅ Sent to ${user.email}`);
         } catch (err) {
-          console.error(`❌ Failed to send to ${user.email}:`, err.message);
           failedCount++;
           failedEmails.push(user.email);
+          console.error(`❌ Failed to send to ${user.email}:`, err.message);
         }
 
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
-      console.log(
-        `📊 Email campaign complete: ${sentCount} sent, ${failedCount} failed`
-      );
-      if (failedEmails.length > 0) {
-        console.log("Failed emails:", failedEmails);
-      }
+      console.log(`📊 Email campaign complete: ${sentCount} sent, ${failedCount} failed`);
+      if (failedEmails.length) console.log("Failed emails:", failedEmails);
     })();
 
     res.json({
@@ -343,18 +320,15 @@ export const sendPromotionEmail = async (req, res) => {
   }
 };
 
-// ✅ NEW: Get waste details for debugging
+// ✅ Get waste details for debugging
 export const getWasteDetails = async (req, res) => {
   try {
     const now = new Date();
-    const month = parseInt(req.query.month) || now.getMonth() + 1;
-    const year = parseInt(req.query.year) || now.getFullYear();
-    const start = new Date(year, month - 1, 1);
-    const end = new Date(year, month, 0, 23, 59, 59, 999);
+    const month = parseInt(req.query.month, 10) || now.getMonth() + 1;
+    const year = parseInt(req.query.year, 10) || now.getFullYear();
 
-    // Start of today for consistent "expired" definition
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const { start, end } = monthRangeLocal(year, month);
+    const today = startOfLocalDay();
 
     const allProducts = await Product.find({
       expiryDate: { $gte: start, $lte: end },
@@ -366,7 +340,7 @@ export const getWasteDetails = async (req, res) => {
     res.json({
       month,
       year,
-      currentDate: now,
+      currentDateTime: now.toString(),
       dateRange: {
         start: start.toDateString(),
         end: end.toDateString(),
@@ -375,32 +349,45 @@ export const getWasteDetails = async (req, res) => {
         totalProductsInMonth: allProducts.length,
         expiredCount: expired.length,
         notExpiredYet: notExpired.length,
-        totalWasteValue: expired.reduce(
-          (sum, p) => sum + (p.price || 0),
-          0
-        ),
+        totalWasteValue: expired.reduce((sum, p) => sum + (p.price || 0), 0),
       },
       expiredProducts: expired.map((p) => ({
         name: p.name,
         price: p.price,
         expiryDate: p.expiryDate,
-        daysAgo: Math.floor(
-          (today - p.expiryDate) / (1000 * 60 * 60 * 24)
-        ),
+        daysAgo: Math.floor((today - p.expiryDate) / (1000 * 60 * 60 * 24)),
         user: p.user?.name || "Unknown",
       })),
       upcomingExpiry: notExpired.map((p) => ({
         name: p.name,
         price: p.price,
         expiryDate: p.expiryDate,
-        daysUntil: Math.floor(
-          (p.expiryDate - today) / (1000 * 60 * 60 * 24)
-        ),
+        daysUntil: Math.floor((p.expiryDate - today) / (1000 * 60 * 60 * 24)),
         user: p.user?.name || "Unknown",
       })),
     });
   } catch (err) {
     console.error("❌ Waste Details Error:", err);
     res.status(500).json({ message: err.message });
+  }
+};
+
+// ✅ NEW: Upload image for AdminPromotion (ReactQuill image button)
+// POST /api/admin/upload-image
+export const uploadAdminImage = async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ message: "No image uploaded" });
+    }
+
+    const result = await uploadBufferToCloudinary(req.file.buffer, "reminex/promotions");
+
+    return res.json({
+      url: result.secure_url,
+      public_id: result.public_id,
+    });
+  } catch (err) {
+    console.error("uploadAdminImage error:", err);
+    return res.status(500).json({ message: "Failed to upload image" });
   }
 };

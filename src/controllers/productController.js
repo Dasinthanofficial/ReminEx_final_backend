@@ -1,9 +1,7 @@
 import Product from "../models/Product.js";
 import cloudinary from "../config/cloudinary.js";
+import { parseDateOnlyLocal } from "../utils/dates.js";
 
-/**
- * Helper: upload a buffer to Cloudinary
- */
 const uploadBufferToCloudinary = (buffer, folder) => {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
@@ -89,7 +87,7 @@ export const addProduct = async (req, res) => {
       name,
       weight,
       unit: unit || "g",
-      expiryDate,
+      expiryDate: expiryDate ? parseDateOnlyLocal(expiryDate) : expiryDate,
       price,
       category,
       image: imagePath || undefined,
@@ -140,7 +138,7 @@ export const updateProduct = async (req, res) => {
       name: name ?? product.name,
       weight: weight ?? product.weight,
       unit: unit ?? product.unit,
-      expiryDate: expiryDate ?? product.expiryDate,
+      expiryDate: expiryDate ? parseDateOnlyLocal(expiryDate) : product.expiryDate,
       price: price ?? product.price,
       category: category ?? product.category,
       image: imagePath || product.image,

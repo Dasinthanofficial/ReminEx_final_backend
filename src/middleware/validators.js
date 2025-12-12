@@ -1,4 +1,6 @@
 import { body, param, query, validationResult } from "express-validator";
+import { startOfLocalDay, parseDateOnlyLocal } from "../utils/dates.js";
+
 
 export const validate = (req, res, next) => {
   const errors = validationResult(req);
@@ -93,13 +95,14 @@ export const validateProduct = [
     .notEmpty().withMessage("Category is required")
     .isIn(["Food", "Non-Food"]).withMessage('Category must be either "Food" or "Non‑Food"'),
   body("expiryDate")
-    .notEmpty().withMessage("Expiry date is required")
-    .isISO8601().withMessage("Invalid date format (YYYY‑MM‑DD)")
-    .custom(value => {
-      const expiryDate = new Date(value);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      if (expiryDate < today) throw new Error("Expiry date cannot be in the past");
+    .notEmpty().withMessage("Expiry date is required")
+    .isISO8601().withMessage("Invalid date format (YYYY-MM-DD)")
+    .custom((value) => {
+      const expiryDate =
+        /^\d{4}-\d{2}-\d{2}$/.test(value) ? parseDateOnlyLocal(value) : new Date(value);
+
+      const today = startOfLocalDay();
+      if (expiryDate < today) throw new Error("Expiry date cannot be in the past");
       return true;
     }),
   body("price").optional().isFloat({ min: 0 }).withMessage("Price must be positive"),
@@ -107,8 +110,8 @@ export const validateProduct = [
   body("image")
     .optional({ checkFalsy: true })
     .custom((value, { req }) => {
-      if (req.file) return true;           
-      if (!value) return true;             
+      if (req.file) return true;
+      if (!value) return true;
       try {
         new URL(value);
         return true;

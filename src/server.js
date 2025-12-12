@@ -1,3 +1,5 @@
+// backend/src/server.js
+
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -7,6 +9,7 @@ import connectDB from "./config/db.js";
 import Product from "./models/Product.js";
 import sendEmail from "./utils/sendEmail.js";
 import { stripeWebhook } from "./controllers/paymentController.js";
+import { startOfLocalDay } from "./utils/dates.js";
 
 import authRoutes from "./routes/authRoutes.js";
 import productRoutes from "./routes/productRoutes.js";
@@ -29,7 +32,6 @@ app.disable("x-powered-by");
 // Middleware
 // --------------------------------------------------
 
-// CORS
 app.use(
   cors({
     origin: process.env.CLIENT_URL || "http://localhost:5173",
@@ -49,8 +51,6 @@ app.post(
 // Body parsers (for all other routes)
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
-
-// No /uploads static route anymore
 
 // --------------------------------------------------
 // Routes
@@ -74,8 +74,7 @@ cron.schedule("0 0 * * *", async () => {
   try {
     console.log("📬 Running daily expiry job:", new Date().toISOString());
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = startOfLocalDay();
 
     const sevenDaysLater = new Date(today);
     sevenDaysLater.setDate(today.getDate() + 7);
@@ -108,9 +107,7 @@ cron.schedule("0 0 * * *", async () => {
       }
     }
 
-    console.log(
-      `✅ Email job: ${success} sent, ${fail} failed of ${products.length}`
-    );
+    console.log(`✅ Email job: ${success} sent, ${fail} failed of ${products.length}`);
   } catch (err) {
     console.error("❌ Cron job error:", err);
   }
@@ -120,12 +117,10 @@ cron.schedule("0 0 * * *", async () => {
 // Error Handling
 // --------------------------------------------------
 
-// 404 Handler
 app.use((req, res) => {
   res.status(404).json({ message: "Route not found" });
 });
 
-// Global Error Handler
 app.use((err, req, res, next) => {
   console.error("💥 Server Error:", err);
 
