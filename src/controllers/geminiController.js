@@ -1,4 +1,3 @@
-// src/controllers/geminiController.js
 import axios from "axios";
 import Product from "../models/Product.js";
 import { callOpenRouter } from "../utils/openRouterClient.js";

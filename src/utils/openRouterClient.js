@@ -1,4 +1,3 @@
-// src/utils/openRouterClient.js
 import axios from "axios";
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;

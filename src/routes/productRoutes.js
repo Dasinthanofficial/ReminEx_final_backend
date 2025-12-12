@@ -26,6 +26,10 @@
 //   saveRecipe,
 //   deleteSavedRecipe,
 // } from "../controllers/recipeController.js";
+// import {
+//   scanProductByBarcode,
+//   // scanLabelImage, // uncomment when you add OCR
+// } from "../controllers/scanController.js";
 
 // const router = express.Router();
 
@@ -35,13 +39,19 @@
 // // 🧠 AI: recipe suggestions (premium users only)
 // router.post("/recipe", requirePremium, getRecipeSuggestion);
 
-// // 🌍 AI: translate recipe text (also premium only for consistency)
+// // 🌍 AI: translate recipe text (premium only)
 // router.post("/translate", requirePremium, translateText);
 
-// // 💾 Saved recipes (user can always see their saved ones)
+// // 💾 Saved recipes
 // router.get("/recipes/saved", getSavedRecipes);
 // router.post("/recipes/save", saveRecipe);
 // router.delete("/recipes/:id", deleteSavedRecipe);
+
+// // 🔎 Scan product by barcode (Open Food Facts)
+// router.get("/scan/barcode/:code", scanProductByBarcode);
+
+// // 🔎 Scan label image for expiry/weight (if you want OCR later)
+// // router.post("/scan/label", upload.single("image"), scanLabelImage);
 
 // // ✅ Get products
 // router.get("/", getProducts);
@@ -52,7 +62,7 @@
 // // ✅ Add product (supports image file or URL)
 // router.post(
 //   "/",
-//   upload.single("image"), // field name must match frontend FormData key
+//   upload.single("image"),
 //   validateProduct,
 //   addProduct
 // );
@@ -72,6 +82,8 @@
 // export default router;
 
 
+
+// backend/src/routes/productRoutes.js
 import express from "express";
 import {
   getProducts,
@@ -102,7 +114,7 @@ import {
 } from "../controllers/recipeController.js";
 import {
   scanProductByBarcode,
-  // scanLabelImage, // uncomment when you add OCR
+  scanLabelImage,          // ✅ import enabled
 } from "../controllers/scanController.js";
 
 const router = express.Router();
@@ -124,8 +136,8 @@ router.delete("/recipes/:id", deleteSavedRecipe);
 // 🔎 Scan product by barcode (Open Food Facts)
 router.get("/scan/barcode/:code", scanProductByBarcode);
 
-// 🔎 Scan label image for expiry/weight (if you want OCR later)
-// router.post("/scan/label", upload.single("image"), scanLabelImage);
+// 🔎 Scan label image for expiry/weight (OCR)
+router.post("/scan/label", upload.single("image"), scanLabelImage);  // ✅ enabled
 
 // ✅ Get products
 router.get("/", getProducts);
