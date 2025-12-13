@@ -15,9 +15,7 @@ const ZERO_DECIMAL_CURRENCIES = [
   "UGX","VND","VUV","XAF","XOF","XPF"
 ];
 
-// --------------------------------------------------
-// 1. FULFILL ORDER (CALLED AFTER PAYMENT SUCCESS)
-// --------------------------------------------------
+
 const fulfillOrder = async (session) => {
   try {
     console.log("🔄 Fulfilling order for session:", session.id);

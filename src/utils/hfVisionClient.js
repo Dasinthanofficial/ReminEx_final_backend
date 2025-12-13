@@ -31,7 +31,7 @@ export const askVisionModel = async (imageBuffer) => {
       provider: "hf-inference", // 👈 force Hugging Face Inference provider
     });
 
-    // result is usually { generated_text: "..." } but we handle a few shapes
+   
     const text =
       result.generated_text ||
       result.text ||
