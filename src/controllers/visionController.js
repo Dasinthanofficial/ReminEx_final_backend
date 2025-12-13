@@ -1,75 +1,155 @@
 // backend/src/controllers/visionController.js
-import { askVisionModel } from "../utils/hfVisionClient.js";
+import { analyzeImageWithGemini } from "../utils/geminiVisionClient.js";
 
 /**
- * POST /api/products/predict-image
- * Form-data: image (file)
- * Uses HF vision model to caption the image, then heuristics to guess condition & days.
+ * Extract + parse a JSON object from model output.
+ * Handles code fences and some common formatting issues.
  */
+const tryParseJsonFromText = (raw = "") => {
+  let s = String(raw || "").trim();
+
+  // remove markdown fences
+  s = s.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+
+  // If there's a JSON object somewhere, slice from first { to last }
+  const first = s.indexOf("{");
+  const last = s.lastIndexOf("}");
+  if (first !== -1 && last !== -1 && last > first) {
+    s = s.slice(first, last + 1);
+  }
+
+  // fix trailing commas like {"a":1,}
+  s = s.replace(/,\s*}/g, "}");
+
+  // attempt parse
+  return JSON.parse(s);
+};
+
+/**
+ * If JSON parsing fails, try to extract fields via regex.
+ * This prevents "default fallback" when Gemini returns slightly malformed JSON.
+ */
+const tryExtractFieldsHeuristically = (raw = "") => {
+  const s = String(raw || "");
+
+  const condMatch = s.match(/"condition"\s*:\s*"([^"]+)"/i);
+  const daysMatch = s.match(/"days"\s*:\s*(-?\d+)/i);
+  const notesMatch = s.match(/"notes"\s*:\s*"([^"]*)"/i);
+
+  const condition = condMatch?.[1]?.trim();
+  let days = daysMatch ? parseInt(daysMatch[1], 10) : NaN;
+  const notes = notesMatch?.[1]?.trim();
+
+  // If days missing, infer from condition
+  if (Number.isNaN(days)) {
+    if (condition?.toLowerCase().includes("rott")) days = 0;
+    else if (condition?.toLowerCase().includes("slight")) days = 2;
+    else days = 5;
+  }
+
+  return {
+    condition: condition || "fresh",
+    days,
+    notes: notes || "Heuristic parse (AI output was not clean JSON).",
+  };
+};
+
 export const predictSpoilageFromImage = async (req, res) => {
   try {
-    if (!req.file || !req.file.buffer) {
-      return res
-        .status(400)
-        .json({ success: false, message: "No image uploaded" });
+    if (!req.file?.buffer) {
+      return res.status(400).json({
+        success: false,
+        message: "No image uploaded",
+      });
     }
 
-    // 1️⃣ Get caption from HF vision model
-    const caption = await askVisionModel(req.file.buffer);
-    console.log("Caption from HF vision model:", caption);
+    const base64Image = req.file.buffer.toString("base64");
+    const mimeType = req.file.mimetype || "image/jpeg";
 
-    // 2️⃣ Simple heuristic based on caption text
-    const lower = caption.toLowerCase();
+    console.log("📸 Starting Gemini image analysis...");
 
-    let condition = "fresh";
-    let days = 5;
+    let result = null;
+    let aiUsed = false;
 
-    // Very rough rules:
-    if (
-      lower.includes("mold") ||
-      lower.includes("mould") ||
-      lower.includes("rotten") ||
-      lower.includes("rot") ||
-      lower.includes("decay") ||
-      lower.includes("spoiled") ||
-      lower.includes("bad")
-    ) {
-      condition = "rotting";
-      days = 0; // basically unsafe now
-    } else if (
-      lower.includes("brown") ||
-      lower.includes("spot") ||
-      lower.includes("bruise") ||
-      lower.includes("soft") ||
-      lower.includes("damaged") ||
-      lower.includes("blemish")
-    ) {
-      condition = "slightly damaged";
-      days = 2; // use soon
-    } else {
-      condition = "fresh";
-      days = 5; // default for good-looking produce
+    // Try Gemini analysis
+    try {
+      const modelText = await analyzeImageWithGemini(base64Image, mimeType);
+      console.log("✅ Raw Gemini response:", String(modelText).slice(0, 150));
+
+      try {
+        result = tryParseJsonFromText(modelText);
+        aiUsed = true;
+        console.log("✅ Gemini analysis successful (JSON):", result);
+      } catch {
+        // fallback parse
+        result = tryExtractFieldsHeuristically(modelText);
+        aiUsed = true;
+        console.warn("⚠️ Gemini returned non-clean JSON. Used heuristic parse:", result);
+      }
+    } catch (aiErr) {
+      console.warn("⚠️ Gemini AI failed:", aiErr.message);
     }
 
-    // 3️⃣ Compute expiry date: today + days
+    // Default fallback if AI totally failed
+    if (!result) {
+      console.log("📊 Using default produce estimate (AI unavailable)");
+      result = {
+        condition: "fresh",
+        days: 5,
+        notes:
+          "Standard fresh produce estimate. Please adjust if needed based on visual inspection.",
+      };
+      aiUsed = false;
+    }
+
+    // Normalize days
+    let days = parseInt(result.days, 10);
+    if (Number.isNaN(days) || days < 0) {
+      days = 5;
+      console.warn("⚠️ Invalid days value, using default: 5");
+    }
+    if (days > 14) {
+      days = 14;
+      console.warn("⚠️ Days capped at maximum: 14");
+    }
+
+    // Calculate expiry date
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const expiryDate = new Date(today);
     expiryDate.setDate(expiryDate.getDate() + days);
 
-    res.json({
+    const payload = {
       success: true,
-      condition,
+      condition: result.condition || "fresh",
       days,
-      notes: caption, // show caption as note
+      notes: result.notes || "Analysis complete",
       expiryDate,
       expiryDateISO: expiryDate.toISOString().slice(0, 10),
-    });
+      aiUsed,
+      method: aiUsed ? "gemini" : "default",
+    };
+
+    console.log(`✅ Prediction complete: ${days} days (method: ${payload.method})`);
+    return res.json(payload);
   } catch (err) {
-    console.error("Vision spoilage error:", err);
-    res.status(500).json({
-      success: false,
-      message: "Failed to analyze image",
+    console.error("❌ Vision endpoint error:", err);
+
+    // Final fallback
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const expiryDate = new Date(today);
+    expiryDate.setDate(expiryDate.getDate() + 5);
+
+    return res.json({
+      success: true,
+      condition: "fresh",
+      days: 5,
+      notes: "Default 5-day estimate. Please adjust based on visual inspection.",
+      expiryDate,
+      expiryDateISO: expiryDate.toISOString().slice(0, 10),
+      aiUsed: false,
+      method: "fallback",
     });
   }
 };
