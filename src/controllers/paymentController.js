@@ -4,10 +4,6 @@ import User from "../models/User.js";
 import Plan from "../models/Plan.js";
 import { getExchangeRate } from "../utils/currencyConverter.js";
 import sendEmail from "../utils/sendEmail.js";
-import dotenv from "dotenv";
-
-dotenv.config();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 // Currencies without decimals
 const ZERO_DECIMAL_CURRENCIES = [
@@ -15,6 +11,31 @@ const ZERO_DECIMAL_CURRENCIES = [
   "UGX","VND","VUV","XAF","XOF","XPF"
 ];
 
+// ✅ Lazy Stripe init (prevents Render crash when STRIPE_SECRET_KEY missing)
+let stripeClient = null;
+
+const getStripe = () => {
+  if (stripeClient) return stripeClient;
+
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) {
+    const err = new Error("Stripe is not configured (missing STRIPE_SECRET_KEY).");
+    err.statusCode = 500;
+    throw err;
+  }
+
+  stripeClient = new Stripe(key);
+  return stripeClient;
+};
+
+const requireStripeConfigured = (res) => {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    return res.status(500).json({
+      message: "Stripe is not configured on the server. Please set STRIPE_SECRET_KEY in environment variables.",
+    });
+  }
+  return null;
+};
 
 const fulfillOrder = async (session) => {
   try {
@@ -44,30 +65,24 @@ const fulfillOrder = async (session) => {
     const currency = (session.currency || "usd").toUpperCase();
     const isZeroDecimal = ZERO_DECIMAL_CURRENCIES.includes(currency);
 
-    // Correct amount handling for zero-decimal currencies
     const amountPaid = isZeroDecimal
       ? (session.amount_total || 0)
       : (session.amount_total || 0) / 100;
 
-    // Set expiry date: add billing duration and trial days if trial present
+    // NOTE: you always add +7 here. That matches your "7-day trial" design.
     const durationDays = finalPlanName === "Yearly" ? 365 : 30;
     const expiry = new Date();
     expiry.setDate(expiry.getDate() + durationDays + 7);
 
-    // Update user
     user.plan = finalPlanName;
     user.planExpiry = expiry;
     await user.save();
 
-    // Find Stripe subscription ID (sub_xxx) if available
+    // Stripe subscription id
     let stripeSubId = null;
-    if (typeof session.subscription === "string") {
-      stripeSubId = session.subscription;
-    } else if (session.subscription?.id) {
-      stripeSubId = session.subscription.id;
-    }
+    if (typeof session.subscription === "string") stripeSubId = session.subscription;
+    else if (session.subscription?.id) stripeSubId = session.subscription.id;
 
-    // Create Subscription Record
     await Subscription.create({
       user: user._id,
       plan: planId,
@@ -80,11 +95,10 @@ const fulfillOrder = async (session) => {
       subscriptionId: stripeSubId,
     });
 
-    // Send email (best-effort)
+    // Best-effort email
     try {
-      const subject = amountPaid === 0
-        ? "🌟 Your 7-Day Free Trial Started!"
-        : "🧾 Payment Receipt";
+      const subject =
+        amountPaid === 0 ? "Your 7-Day Free Trial Started!" : "Payment Receipt";
 
       await sendEmail(
         user.email,
@@ -106,46 +120,42 @@ const fulfillOrder = async (session) => {
 // --------------------------------------------------
 export const createCheckoutSession = async (req, res) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ message: "Login required" });
-    }
+    // ✅ don’t crash if missing Stripe config
+    const stripeMissing = requireStripeConfigured(res);
+    if (stripeMissing) return stripeMissing;
+
+    const stripe = getStripe();
+
+    if (!req.user) return res.status(401).json({ message: "Login required" });
 
     const { planId, currency = "USD" } = req.body;
-    if (!planId) {
-      return res.status(400).json({ message: "planId is required" });
-    }
+    if (!planId) return res.status(400).json({ message: "planId is required" });
 
     const plan = await Plan.findById(planId);
-    if (!plan) {
-      return res.status(404).json({ message: "Plan not found" });
-    }
+    if (!plan) return res.status(404).json({ message: "Plan not found" });
 
-    // Prevent checkout for free plans
     if (plan.price <= 0 || plan.name === "Free") {
       return res.status(400).json({ message: "Free plan does not require payment." });
     }
 
     const targetCurrency = (currency || "USD").toUpperCase();
 
-    // Exchange rate - guard against failures
     let rate;
     try {
       rate = await getExchangeRate(targetCurrency);
-      if (!rate || typeof rate !== "number") {
-        throw new Error("Invalid exchange rate");
-      }
+      if (!rate || typeof rate !== "number") throw new Error("Invalid exchange rate");
     } catch (exRateErr) {
       console.error("❌ Exchange rate error:", exRateErr?.message || exRateErr);
       return res.status(500).json({ message: "Failed to get exchange rate" });
     }
 
     const convertedAmount = plan.price * rate;
+
     const isZeroDecimal = ZERO_DECIMAL_CURRENCIES.includes(targetCurrency);
     const stripeAmount = isZeroDecimal
       ? Math.round(convertedAmount)
       : Math.round(convertedAmount * 100);
 
-    // Minimum charge guard
     if (stripeAmount < 50 && !isZeroDecimal) {
       return res.status(400).json({ message: `Amount too low to process in ${targetCurrency}` });
     }
@@ -185,19 +195,13 @@ export const createCheckoutSession = async (req, res) => {
         cancel_url: `${process.env.CLIENT_URL}/plans`,
       });
     } catch (stripeErr) {
-      console.error(
-        "🔥 STRIPE CHECKOUT ERROR:",
-        stripeErr?.raw?.message || stripeErr?.message || stripeErr
-      );
+      console.error("🔥 STRIPE CHECKOUT ERROR:", stripeErr?.raw?.message || stripeErr?.message || stripeErr);
       return res.status(500).json({
-        message:
-          stripeErr?.raw?.message ||
-          stripeErr?.message ||
-          "Stripe checkout creation failed",
+        message: stripeErr?.raw?.message || stripeErr?.message || "Stripe checkout creation failed",
       });
     }
 
-    if (!session || !session.url) {
+    if (!session?.url) {
       console.error("❌ Stripe returned no session url:", session);
       return res.status(500).json({
         message: "Failed to create checkout session (no URL returned by Stripe)",
@@ -207,9 +211,7 @@ export const createCheckoutSession = async (req, res) => {
     return res.json({ url: session.url, sessionId: session.id });
   } catch (err) {
     console.error("❌ Create Checkout Error:", err);
-    return res.status(500).json({
-      message: err?.message || "Server error creating checkout session",
-    });
+    return res.status(500).json({ message: err?.message || "Server error creating checkout session" });
   }
 };
 
@@ -218,6 +220,11 @@ export const createCheckoutSession = async (req, res) => {
 // --------------------------------------------------
 export const cancelSubscription = async (req, res) => {
   try {
+    const stripeMissing = requireStripeConfigured(res);
+    if (stripeMissing) return stripeMissing;
+
+    const stripe = getStripe();
+
     if (!req.user) return res.status(401).json({ message: "Login required" });
 
     const user = await User.findById(req.user._id);
@@ -242,11 +249,7 @@ export const cancelSubscription = async (req, res) => {
               : session.subscription?.id;
         }
       } catch (e) {
-        console.warn(
-          "Could not retrieve session for providerId:",
-          sub.providerId,
-          e?.message || e
-        );
+        console.warn("Could not retrieve session for providerId:", sub.providerId, e?.message || e);
       }
     }
 
@@ -254,10 +257,7 @@ export const cancelSubscription = async (req, res) => {
       try {
         await stripe.subscriptions.cancel(stripeSubId);
       } catch (stripeCancelErr) {
-        console.error(
-          "⚠️ Stripe cancellation error:",
-          stripeCancelErr?.message || stripeCancelErr
-        );
+        console.error("⚠️ Stripe cancellation error:", stripeCancelErr?.message || stripeCancelErr);
       }
     }
 
@@ -269,11 +269,7 @@ export const cancelSubscription = async (req, res) => {
     await user.save();
 
     try {
-      await sendEmail(
-        user.email,
-        "Subscription Cancelled",
-        "Your premium plan has been cancelled."
-      );
+      await sendEmail(user.email, "Subscription Cancelled", "Your premium plan has been cancelled.");
     } catch (emailErr) {
       console.warn("Cancel email failed:", emailErr?.message || emailErr);
     }
@@ -290,20 +286,29 @@ export const cancelSubscription = async (req, res) => {
 // --------------------------------------------------
 export const verifyPayment = async (req, res) => {
   try {
-    if (!req.user)
-      return res
-        .status(401)
-        .json({ success: false, message: "Login required" });
+    const stripeMissing = requireStripeConfigured(res);
+    if (stripeMissing) return stripeMissing;
+
+    const stripe = getStripe();
+
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Login required" });
+    }
 
     const { sessionId } = req.query;
-    if (!sessionId)
-      return res
-        .status(400)
-        .json({ success: false, message: "Missing sessionId" });
+    if (!sessionId) {
+      return res.status(400).json({ success: false, message: "Missing sessionId" });
+    }
 
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-    if (session.payment_status === "paid" || session.status === "complete") {
+    // ✅ Trials can be "no_payment_required" but still complete
+    const ok =
+      session.status === "complete" ||
+      session.payment_status === "paid" ||
+      session.payment_status === "no_payment_required";
+
+    if (ok) {
       await fulfillOrder(session);
 
       const user = await User.findById(req.user._id);
@@ -328,6 +333,13 @@ export const verifyPayment = async (req, res) => {
 // 5. STRIPE WEBHOOK
 // --------------------------------------------------
 export const stripeWebhook = async (req, res) => {
+  // If Stripe not configured, don’t crash the server; return error to Stripe
+  if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) {
+    return res.status(500).send("Stripe not configured");
+  }
+
+  const stripe = getStripe();
+
   const sig = req.headers["stripe-signature"];
   let event;
 
@@ -339,9 +351,7 @@ export const stripeWebhook = async (req, res) => {
     );
   } catch (err) {
     console.error("Webhook signature error:", err?.message || err);
-    return res
-      .status(400)
-      .send(`Webhook Error: ${err?.message || "Invalid signature"}`);
+    return res.status(400).send(`Webhook Error: ${err?.message || "Invalid signature"}`);
   }
 
   try {
@@ -352,5 +362,5 @@ export const stripeWebhook = async (req, res) => {
     console.error("Error handling webhook event:", e);
   }
 
-  res.json({ received: true });
+  return res.json({ received: true });
 };
