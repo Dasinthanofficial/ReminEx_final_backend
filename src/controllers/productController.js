@@ -1,37 +1,35 @@
 import Product from "../models/Product.js";
+import RecipeSuggestion from "../models/RecipeSuggestion.js"; // ✅ FIX: import it
 import cloudinary from "../config/cloudinary.js";
 import { parseDateOnlyLocal } from "../utils/dates.js";
 
 const uploadBufferToCloudinary = (buffer, folder) => {
   return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      { folder },
-      (err, result) => {
-        if (err) return reject(err);
-        resolve(result);
-      }
-    );
+    const stream = cloudinary.uploader.upload_stream({ folder }, (err, result) => {
+      if (err) return reject(err);
+      resolve(result);
+    });
     stream.end(buffer);
   });
 };
 
 /**
- * 🟢  GET all products for current user
+ * 🟢 GET all products for current user
  */
 export const getProducts = async (req, res) => {
   try {
     const products = await Product.find({ user: req.user._id }).sort({
       createdAt: -1,
     });
-    res.json(products);
+    return res.json(products);
   } catch (err) {
     console.error("Error fetching products:", err);
-    res.status(500).json({ message: err.message });
+    return res.status(500).json({ message: err.message });
   }
 };
 
 /**
- * 🟢  GET a single product by ID
+ * 🟢 GET a single product by ID
  */
 export const getProduct = async (req, res) => {
   try {
@@ -39,29 +37,28 @@ export const getProduct = async (req, res) => {
       _id: req.params.id,
       user: req.user._id,
     });
-    if (!product)
-      return res.status(404).json({ message: "Product not found" });
-    res.json(product);
+
+    if (!product) return res.status(404).json({ message: "Product not found" });
+
+    return res.json(product);
   } catch (err) {
     console.error("Error fetching product:", err);
-    res.status(500).json({ message: err.message });
+    return res.status(500).json({ message: err.message });
   }
 };
 
 /**
- * 🟢  ADD product (supports image file or URL)
+ * 🟢 ADD product (supports image file or URL)
  * Free plan users limited to 5 products
  */
 export const addProduct = async (req, res) => {
   try {
     const { name, weight, unit, expiryDate, price, category } = req.body;
 
-    // Validate category
     if (!["Food", "Non-Food"].includes(category)) {
       return res.status(400).json({ message: "Invalid category" });
     }
 
-    // Enforce Free-plan product limit
     const currentCount = req.user.productCount || 0;
     if (req.user.plan === "Free" && currentCount >= 5) {
       return res.status(403).json({
@@ -71,10 +68,9 @@ export const addProduct = async (req, res) => {
       });
     }
 
-    // Handle image: URL or upload to Cloudinary
     let imagePath = req.body.image || "";
 
-    if (req.file && req.file.buffer) {
+    if (req.file?.buffer) {
       const uploadResult = await uploadBufferToCloudinary(
         req.file.buffer,
         "reminex/products"
@@ -96,15 +92,15 @@ export const addProduct = async (req, res) => {
     req.user.productCount = currentCount + 1;
     await req.user.save();
 
-    res.status(201).json({ message: "Product added successfully", product });
+    return res.status(201).json({ message: "Product added successfully", product });
   } catch (err) {
     console.error("Error adding product:", err);
-    res.status(500).json({ message: err.message });
+    return res.status(500).json({ message: err.message });
   }
 };
 
 /**
- * 🟢  UPDATE product (supports new file, URL, or details only)
+ * 🟢 UPDATE product (supports new file, URL, or details only)
  */
 export const updateProduct = async (req, res) => {
   try {
@@ -112,8 +108,8 @@ export const updateProduct = async (req, res) => {
       _id: req.params.id,
       user: req.user._id,
     });
-    if (!product)
-      return res.status(404).json({ message: "Product not found" });
+
+    if (!product) return res.status(404).json({ message: "Product not found" });
 
     const { name, weight, unit, expiryDate, price, category } = req.body;
 
@@ -123,14 +119,13 @@ export const updateProduct = async (req, res) => {
 
     let imagePath = product.image;
 
-    if (req.file && req.file.buffer) {
+    if (req.file?.buffer) {
       const uploadResult = await uploadBufferToCloudinary(
         req.file.buffer,
         "reminex/products"
       );
       imagePath = uploadResult.secure_url;
     } else if (req.body.image) {
-      // Direct URL from client
       imagePath = req.body.image;
     }
 
@@ -145,16 +140,16 @@ export const updateProduct = async (req, res) => {
     });
 
     await product.save();
-    res.json({ message: "Product updated successfully", product });
+
+    return res.json({ message: "Product updated successfully", product });
   } catch (err) {
     console.error("Error updating product:", err);
-    res.status(500).json({ message: err.message });
+    return res.status(500).json({ message: err.message });
   }
 };
 
 /**
- * 🟢  DELETE product + decrement counter
- * (Images live in Cloudinary; no local file to delete)
+ * 🟢 DELETE product + decrement counter
  */
 export const deleteProduct = async (req, res) => {
   try {
@@ -162,17 +157,25 @@ export const deleteProduct = async (req, res) => {
       _id: req.params.id,
       user: req.user._id,
     });
+
     if (!product) return res.status(404).json({ message: "Product not found" });
 
-    // ✅ remove persistent cached recipes for this product
-    await RecipeSuggestion.deleteMany({ user: req.user._id, product: product._id });
+    // ✅ best-effort: delete cached recipes, but don’t fail deletion if this fails
+    try {
+      await RecipeSuggestion.deleteMany({
+        user: req.user._id,
+        product: product._id,
+      });
+    } catch (e) {
+      console.warn("⚠️ Failed to delete RecipeSuggestion cache:", e?.message || e);
+    }
 
     req.user.productCount = Math.max(0, (req.user.productCount || 0) - 1);
     await req.user.save();
 
-    res.json({ message: "Product deleted successfully" });
+    return res.json({ message: "Product deleted successfully" });
   } catch (err) {
     console.error("Error deleting product:", err);
-    res.status(500).json({ message: err.message });
+    return res.status(500).json({ message: err.message });
   }
 };
