@@ -162,13 +162,12 @@ export const deleteProduct = async (req, res) => {
       _id: req.params.id,
       user: req.user._id,
     });
-    if (!product)
-      return res.status(404).json({ message: "Product not found" });
+    if (!product) return res.status(404).json({ message: "Product not found" });
 
-    req.user.productCount = Math.max(
-      0,
-      (req.user.productCount || 0) - 1
-    );
+    // ✅ remove persistent cached recipes for this product
+    await RecipeSuggestion.deleteMany({ user: req.user._id, product: product._id });
+
+    req.user.productCount = Math.max(0, (req.user.productCount || 0) - 1);
     await req.user.save();
 
     res.json({ message: "Product deleted successfully" });
