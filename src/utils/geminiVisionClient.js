@@ -102,14 +102,28 @@ export const analyzeImageWithGemini = async (
     throw new Error("GOOGLE_GEMINI_API_KEY not configured in .env");
   }
 
-  const prompt = `Return ONLY valid JSON (no markdown, no extra text):
-{"condition":"fresh","days":5,"notes":"Brief observation"}
+const prompt = `
+You are a food safety assistant.
+
+Return ONLY valid JSON.
+No markdown.
+No explanation.
+No extra text.
+
+JSON schema (STRICT):
+{
+  "condition": "fresh" | "slightly_damaged" | "rotting",
+  "days": number,
+  "notes": string
+}
 
 Rules:
-- fresh → 5–7 days
-- slightly damaged → 2–3 days
-- rotting → 0 days
-Be conservative for food safety.`;
+- If clearly fresh → condition="fresh", days=5 to 7
+- If minor bruises / cuts → condition="slightly_damaged", days=2 or 3
+- If mold, slime, rot → condition="rotting", days=0
+- If unsure → choose the SAFER (lower days) option
+`;
+
 
   const body = {
     contents: [
