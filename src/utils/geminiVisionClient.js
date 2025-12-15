@@ -1,4 +1,3 @@
-// backend/src/utils/geminiVisionClient.js
 import axios from "axios";
 
 const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY;
@@ -102,7 +101,7 @@ export const analyzeImageWithGemini = async (
     throw new Error("GOOGLE_GEMINI_API_KEY not configured in .env");
   }
 
-const prompt = `
+  const prompt = `
 You are a food safety assistant.
 
 Return ONLY valid JSON.

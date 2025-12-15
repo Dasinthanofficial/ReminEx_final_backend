@@ -74,6 +74,8 @@ export const updatePlan = async (req, res) => {
 };
 
 // ✅ Delete plan
+
+
 export const deletePlan = async (req, res) => {
   try {
     const plan = await Plan.findByIdAndDelete(req.params.id);
