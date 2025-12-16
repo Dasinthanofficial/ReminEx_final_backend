@@ -3,6 +3,7 @@ import {
   getUserDashboard,
   getUserMonthlyReport,
   updateUserProfile,
+  getUserNotifications, // 🟢
 } from "../controllers/userController.js";
 import {
   protect,
@@ -25,5 +26,8 @@ router.get("/reports", validateMonthYear, requirePremium, getUserMonthlyReport);
 
 // ✅ Profile update (name + avatar)
 router.put("/profile", upload.single("avatar"), updateUserProfile);
+
+// ✅ Notifications for bell icon (computed from products)
+router.get("/notifications", getUserNotifications);
 
 export default router;

@@ -6,6 +6,7 @@ import cron from "node-cron";
 
 import connectDB from "./config/db.js";
 import Product from "./models/Product.js";
+import Notification from "./models/Notification.js"; // 🟢 NEW
 import sendEmail from "./utils/sendEmail.js";
 import { stripeWebhook } from "./controllers/paymentController.js";
 import { startOfLocalDay } from "./utils/dates.js";
@@ -69,7 +70,7 @@ app.use("/api/plans", planRoutes);
 app.use("/api/payment", paymentRoutes);
 
 // ------------------------------------------------------------------
-// 4️⃣  DAILY CRON JOB – expiry reminder emails
+// 4️⃣  DAILY CRON JOB – expiry reminder emails + notifications
 // ------------------------------------------------------------------
 cron.schedule("0 0 * * *", async () => {
   try {
@@ -96,6 +97,18 @@ cron.schedule("0 0 * * *", async () => {
 
         await sendEmail(p.user.email, subject, text);
         sent++;
+
+        // 🟢 Also create in-app notification
+        await Notification.create({
+          user: p.user._id,
+          type: "expiry",
+          title: "Expiry Alert",
+          message: `“${p.name}” will expire on ${p.expiryDate.toDateString()}.`,
+          meta: {
+            productId: p._id,
+            expiryDate: p.expiryDate,
+          },
+        });
       } catch (e) {
         console.error(`❌ Failed to send → ${p.user.email}:`, e.message);
         failed++;

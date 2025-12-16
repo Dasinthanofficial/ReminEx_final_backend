@@ -56,14 +56,23 @@ export const getRecipeSuggestion = async (req, res) => {
     sevenDaysLater.setDate(today.getDate() + 7);
     sevenDaysLater.setHours(23, 59, 59, 999);
 
-    // ✅ fetch ALL products expiring within 7 days (no limit)
-    const products = await Product.find({
+    // ✅ read force + limit from query
+    const force = req.query.force === "1" || req.query.force === "true";
+    const limitParam = parseInt(req.query.limit, 10);
+
+    // ✅ fetch ALL products expiring within 7 days
+    let products = await Product.find({
       user: userId,
       category: "Food",
       expiryDate: { $gte: today, $lte: sevenDaysLater },
     })
       .sort({ expiryDate: 1 })
       .lean();
+
+    // apply optional limit (10, 25, 50 etc)
+    if (!Number.isNaN(limitParam) && limitParam > 0) {
+      products = products.slice(0, limitParam);
+    }
 
     if (!products.length) {
       return res.status(404).json({
@@ -92,8 +101,8 @@ export const getRecipeSuggestion = async (req, res) => {
 
       let cached = cacheMap.get(mapKey);
 
-      // ✅ reuse if cached
-      if (cached) {
+      // ✅ reuse cache ONLY if not forcing regeneration
+      if (cached && !force) {
         output.push({
           id: product._id,
           name: product.name,
@@ -104,14 +113,21 @@ export const getRecipeSuggestion = async (req, res) => {
         continue;
       }
 
-      // ✅ generate once if not cached
+      // ✅ generate once if not cached OR force == true
       const expStr = new Date(product.expiryDate).toDateString();
+
+      // small hint to the model when forcing regeneration
+      const regenHint = force
+        ? "This is a new request for a DIFFERENT recipe than previous ones for this ingredient. Please vary the dish and instructions."
+        : "";
 
       const prompt = `
 You are a fun, friendly home cook helping someone reduce food waste by using ingredients that are close to their expiry date.
 
 Write ONE short, realistic recipe in friendly, natural English that uses *${product.name}* as a key ingredient
 (expiring on ${expStr}). Focus on everyday home cooking, not restaurant style.
+
+${regenHint}
 
 Tone:
 - Light and playful.
@@ -153,7 +169,7 @@ Constraints:
             : "Recipe AI is currently unavailable. Please try again later.";
       }
 
-      // ✅ upsert persistent cache
+      // ✅ upsert persistent cache (overwrites if force == true)
       const saved = await RecipeSuggestion.findOneAndUpdate(
         { user: userId, product: product._id, expiryKey },
         {
@@ -208,7 +224,8 @@ export const translateText = async (req, res) => {
       });
     }
 
-    if (targetLang === "English") return res.json({ success: true, translated: text });
+    if (targetLang === "English")
+      return res.json({ success: true, translated: text });
 
     const targetCode = LANG_CODES[targetLang];
     if (!targetCode) {
@@ -247,7 +264,8 @@ export const translateText = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to translate",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+      error:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
