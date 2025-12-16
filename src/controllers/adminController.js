@@ -1,5 +1,3 @@
-// backend/src/controllers/adminController.js
-
 import Product from "../models/Product.js";
 import User from "../models/User.js";
 import Subscription from "../models/Subscription.js";
@@ -249,7 +247,6 @@ export const sendPromotionEmail = async (req, res) => {
     (async () => {
       for (const user of users) {
         try {
-          // message is HTML from ReactQuill; keep as-is for HTML email.
           const personalizedHtml = `
             <!DOCTYPE html>
             <html>
@@ -276,10 +273,11 @@ export const sendPromotionEmail = async (req, res) => {
                   <div style="font-size: 16px; color: #333; line-height: 1.6;">
                     ${message}
                   </div>
-                  ${user.plan === "Free"
-              ? `<a href="${process.env.CLIENT_URL}/plans" class="button">Upgrade to Premium</a>`
-              : ""
-            }
+                  ${
+                    user.plan === "Free"
+                      ? `<a href="${process.env.CLIENT_URL}/plans" class="button">Upgrade to Premium</a>`
+                      : ""
+                  }
                 </div>
                 <div class="footer">
                   <p>You received this email because you are a ${user.plan} member of ReminEx.</p>
@@ -290,8 +288,10 @@ export const sendPromotionEmail = async (req, res) => {
             </html>
           `;
 
-          // Plain-text fallback: strip tags
-          const plainText = message.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+          const plainText = message
+            .replace(/<[^>]+>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
 
           await sendEmail(user.email, subject, plainText, personalizedHtml);
           sentCount++;
@@ -373,14 +373,16 @@ export const getWasteDetails = async (req, res) => {
 };
 
 // ✅ NEW: Upload image for AdminPromotion (ReactQuill image button)
-// POST /api/admin/upload-image
 export const uploadAdminImage = async (req, res) => {
   try {
     if (!req.file?.buffer) {
       return res.status(400).json({ message: "No image uploaded" });
     }
 
-    const result = await uploadBufferToCloudinary(req.file.buffer, "reminex/promotions");
+    const result = await uploadBufferToCloudinary(
+      req.file.buffer,
+      "reminex/promotions"
+    );
 
     return res.json({
       url: result.secure_url,
@@ -391,7 +393,6 @@ export const uploadAdminImage = async (req, res) => {
     return res.status(500).json({ message: "Failed to upload image" });
   }
 };
-
 
 // ✅ SUPER ADMIN: update a user's role
 export const updateUserRole = async (req, res) => {
@@ -430,5 +431,3 @@ export const updateUserRole = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
-

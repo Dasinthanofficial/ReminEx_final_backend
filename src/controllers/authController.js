@@ -1,6 +1,6 @@
 import User from "../models/User.js";
 import generateToken from "../utils/generateToken.js";
-import sendEmail from "../utils/sendEmail.js"; 
+import sendEmail from "../utils/sendEmail.js";
 
 import crypto from "crypto";
 import dotenv from "dotenv";
@@ -93,14 +93,22 @@ export const forgotPassword = async (req, res) => {
     user.otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
     await user.save();
 
-    // Send OTP via email
-    await sendEmail(
-      email,
-      "Password Reset OTP - Food Expiry Tracker",
-      `Hi ${user.name},\n\nYour OTP for password reset is: ${otp}\n\nThis OTP will expire in 10 minutes.\n\nIf you didn't request this, please ignore this email.\n\nBest regards,\nFood Expiry Tracker Team`
-    );
+    const text = `Hi ${user.name},\n\nYour OTP for password reset is: ${otp}\n\nThis OTP will expire in 10 minutes.\n\nIf you didn't request this, please ignore this email.\n\nBest regards,\nFood Expiry Tracker Team`;
 
-    res.json({ message: "OTP sent to your email" });
+    // Send OTP via email
+    try {
+      await sendEmail(
+        email,
+        "Password Reset OTP - Food Expiry Tracker",
+        text
+      );
+      return res.json({ message: "OTP sent to your email" });
+    } catch (emailErr) {
+      console.error("Forgot password email error:", emailErr);
+      return res.status(500).json({
+        message: "Failed to send OTP email. Please try again later.",
+      });
+    }
   } catch (err) {
     console.error("Forgot password error:", err);
     res.status(500).json({ message: err.message });
