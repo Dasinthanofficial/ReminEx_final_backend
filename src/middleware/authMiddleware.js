@@ -28,7 +28,7 @@ export const protect = async (req, res, next) => {
 };
 
 /**
- * Allow only admins.
+ * Allow only admins (includes superadmin).
  */
 export const adminOnly = (req, res, next) => {
   if (!["admin", "superadmin"].includes(req.user?.role)) {
@@ -37,7 +37,9 @@ export const adminOnly = (req, res, next) => {
   next();
 };
 
-
+/**
+ * Allow only superadmins.
+ */
 export const superAdminOnly = (req, res, next) => {
   if (req.user?.role !== "superadmin") {
     return res.status(403).json({ message: "Super admin only" });
@@ -45,15 +47,15 @@ export const superAdminOnly = (req, res, next) => {
   next();
 };
 
-
+/**
+ * Check if user's plan has expired; if so, downgrade to Free.
+ * Use after `protect` on routes that care about plan status.
+ */
 export const checkPlanExpiry = async (req, res, next) => {
   try {
     const user = req.user;
 
-    // Free plan has no expiry
-    if (user.plan === "Free") {
-      return next();
-    }
+    if (user.plan === "Free") return next();
 
     if (user.planExpiry && new Date() > new Date(user.planExpiry)) {
       console.log(
@@ -64,14 +66,12 @@ export const checkPlanExpiry = async (req, res, next) => {
       user.planExpiry = null;
       await user.save();
 
-      // Ensure downstream middleware sees updated plan
       req.user = user;
     }
 
     next();
   } catch (err) {
     console.error("Error checking plan expiry:", err);
-    // Do not block the request on this error
     next();
   }
 };

@@ -1,26 +1,47 @@
+import express from "express";
 import {
   getAdminDashboard,
   getAllUsers,
   deleteUser,
   sendPromotionEmail,
   uploadAdminImage,
-  updateUserRole,      // 👈 add this
+  updateUserRole,
 } from "../controllers/adminController.js";
-
-import { protect, adminOnly, superAdminOnly } from "../middleware/authMiddleware.js";
-
-import { protect, adminOnly, superAdminOnly } from "../middleware/authMiddleware.js";
+import {
+  protect,
+  adminOnly,
+  superAdminOnly,
+} from "../middleware/authMiddleware.js";
 import { validateMonthYear, validateMongoId } from "../middleware/validators.js";
 import upload from "../middleware/uploadMiddleware.js";
 
 const router = express.Router();
 
-router.get("/dashboard", protect, adminOnly, validateMonthYear, getAdminDashboard);
+// Admin dashboard stats
+router.get(
+  "/dashboard",
+  protect,
+  adminOnly,
+  validateMonthYear,
+  getAdminDashboard
+);
+
+// Get all users
 router.get("/users", protect, adminOnly, getAllUsers);
-router.delete("/users/:id", protect, adminOnly, validateMongoId, deleteUser);
+
+// Delete user (no admins / superadmins via this endpoint)
+router.delete(
+  "/users/:id",
+  protect,
+  adminOnly,
+  validateMongoId,
+  deleteUser
+);
+
+// Send promotion emails
 router.post("/promote", protect, adminOnly, sendPromotionEmail);
 
-// ✅ NEW route used by AdminPromotion ReactQuill image upload
+// Admin promotion image upload (for ReactQuill)
 router.post(
   "/upload-image",
   protect,
@@ -28,7 +49,6 @@ router.post(
   upload.single("image"),
   uploadAdminImage
 );
-
 
 // SUPER ADMIN: change user role
 router.put(
