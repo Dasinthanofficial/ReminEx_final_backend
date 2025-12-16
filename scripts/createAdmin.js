@@ -1,3 +1,4 @@
+// scripts/createAdmin.js (or whatever your filename is)
 import mongoose from "mongoose";
 import User from "../src/models/User.js";
 import dotenv from "dotenv";
@@ -5,12 +6,18 @@ import readline from "readline";
 
 dotenv.config();
 
+if (!process.env.MONGO_URI) {
+  console.error("❌ MONGO_URI is not set in .env");
+  process.exit(1);
+}
+
 const rl = readline.createInterface({
   input: process.stdin,
-  output: process.stdout
+  output: process.stdout,
 });
 
-const question = (query) => new Promise((resolve) => rl.question(query, resolve));
+const question = (query) =>
+  new Promise((resolve) => rl.question(query, (ans) => resolve(ans.trim())));
 
 const createAdmin = async () => {
   try {
@@ -18,62 +25,75 @@ const createAdmin = async () => {
     await mongoose.connect(process.env.MONGO_URI);
     console.log("✅ Connected to MongoDB\n");
 
-    // Get admin details from user input
     console.log("═══════════════════════════════════════");
-    console.log("   CREATE ADMIN USER");
+    console.log("      CREATE ADMIN / SUPERADMIN");
     console.log("═══════════════════════════════════════\n");
 
-    const adminName = await question("Enter admin name: ");
-    const adminEmail = await question("Enter admin email: ");
-    const adminPassword = await question("Enter admin password (min 6 chars): ");
+    const name = await question("Enter name: ");
+    const email = await question("Enter email: ");
+    const password = await question("Enter password (min 6 chars): ");
+    const roleInput = await question(
+      "Enter role (admin/superadmin) [admin]: "
+    );
 
-    // Validate input
-    if (!adminName || !adminEmail || !adminPassword) {
-      console.log("\n❌ All fields are required!");
-      process.exit(1);
+    // ----- Validation -----
+    if (!name || !email || !password) {
+      console.log("\n❌ All fields (name, email, password) are required!");
+      return;
     }
 
-    if (adminPassword.length < 6) {
+    if (password.length < 6) {
       console.log("\n❌ Password must be at least 6 characters!");
-      process.exit(1);
+      return;
     }
 
-    // Check if admin already exists
-    const exists = await User.findOne({ email: adminEmail });
+    let role = "admin";
+    const r = roleInput.toLowerCase();
+    if (r === "superadmin") {
+      role = "superadmin";
+    } else if (r && r !== "admin") {
+      console.log('\n❌ Invalid role. Use "admin" or "superadmin".');
+      return;
+    }
+
+    // Check if user already exists
+    const exists = await User.findOne({ email });
     if (exists) {
       console.log("\n❌ User with this email already exists!");
-      console.log(`   Role: ${exists.role}`);
-      process.exit(1);
+      console.log(`   Existing role: ${exists.role}`);
+      return;
     }
 
-    // Create admin user
-    const admin = await User.create({
-      name: adminName,
-      email: adminEmail,
-      password: adminPassword,
-      role: "admin"
+    // Create user
+    const created = await User.create({
+      name,
+      email,
+      password,
+      role,
     });
 
     console.log("\n═══════════════════════════════════════");
-    console.log("✅ ADMIN USER CREATED SUCCESSFULLY!");
+    console.log("✅ USER CREATED SUCCESSFULLY!");
     console.log("═══════════════════════════════════════");
-    console.log(`Name:  ${admin.name}`);
-    console.log(`Email: ${admin.email}`);
-    console.log(`Role:  ${admin.role}`);
-    console.log(`ID:    ${admin._id}`);
+    console.log(`Name:  ${created.name}`);
+    console.log(`Email: ${created.email}`);
+    console.log(`Role:  ${created.role}`);
+    console.log(`ID:    ${created._id}`);
     console.log("═══════════════════════════════════════\n");
     console.log("⚠️  IMPORTANT SECURITY NOTES:");
     console.log("   1. Store these credentials securely");
     console.log("   2. Change the password after first login");
-    console.log("   3. Never share admin credentials");
+    console.log("   3. Never share admin/superadmin credentials");
     console.log("   4. Enable 2FA if available\n");
-
-    process.exit(0);
   } catch (err) {
-    console.error("\n❌ Error creating admin:", err.message);
-    process.exit(1);
+    console.error("\n❌ Error creating user:", err.message);
   } finally {
     rl.close();
+    try {
+      await mongoose.disconnect();
+    } catch {
+      // ignore
+    }
   }
 };
 
