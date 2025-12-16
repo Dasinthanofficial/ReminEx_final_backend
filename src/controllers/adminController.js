@@ -196,11 +196,12 @@ export const deleteUser = async (req, res) => {
       return res.status(400).json({ message: "You cannot delete your own admin account" });
     }
 
-    // Prevent deleting other admins
-    if (userToDelete.role === "admin") {
-      return res.status(403).json({ message: "Cannot delete admin accounts" });
+    // Prevent deleting any admins / superadmins via this endpoint
+    if (["admin", "superadmin"].includes(userToDelete.role)) {
+      return res
+        .status(403)
+        .json({ message: "Cannot delete admin or superadmin accounts" });
     }
-
     const productCount = await Product.countDocuments({ user: userToDelete._id });
     const subscriptionCount = await Subscription.countDocuments({ user: userToDelete._id });
 
@@ -275,11 +276,10 @@ export const sendPromotionEmail = async (req, res) => {
                   <div style="font-size: 16px; color: #333; line-height: 1.6;">
                     ${message}
                   </div>
-                  ${
-                    user.plan === "Free"
-                      ? `<a href="${process.env.CLIENT_URL}/plans" class="button">Upgrade to Premium</a>`
-                      : ""
-                  }
+                  ${user.plan === "Free"
+              ? `<a href="${process.env.CLIENT_URL}/plans" class="button">Upgrade to Premium</a>`
+              : ""
+            }
                 </div>
                 <div class="footer">
                   <p>You received this email because you are a ${user.plan} member of ReminEx.</p>
@@ -391,3 +391,44 @@ export const uploadAdminImage = async (req, res) => {
     return res.status(500).json({ message: "Failed to upload image" });
   }
 };
+
+
+// ✅ SUPER ADMIN: update a user's role
+export const updateUserRole = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role } = req.body; // "user" | "admin" | "superadmin"
+
+    if (!["user", "admin", "superadmin"].includes(role)) {
+      return res.status(400).json({ message: "Invalid role" });
+    }
+
+    // Prevent changing own role (safety)
+    if (id === String(req.user._id)) {
+      return res
+        .status(400)
+        .json({ message: "You cannot change your own role" });
+    }
+
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    user.role = role;
+    await user.save();
+
+    res.json({
+      message: "User role updated",
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  } catch (err) {
+    console.error("❌ UpdateUserRole Error:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+

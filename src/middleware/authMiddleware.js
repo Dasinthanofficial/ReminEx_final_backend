@@ -31,16 +31,21 @@ export const protect = async (req, res, next) => {
  * Allow only admins.
  */
 export const adminOnly = (req, res, next) => {
-  if (req.user?.role !== "admin") {
+  if (!["admin", "superadmin"].includes(req.user?.role)) {
     return res.status(403).json({ message: "Admin only" });
   }
   next();
 };
 
-/**
- * Check if user's plan has expired; if so, downgrade to Free.
- * Use after `protect` on routes that care about plan status.
- */
+
+export const superAdminOnly = (req, res, next) => {
+  if (req.user?.role !== "superadmin") {
+    return res.status(403).json({ message: "Super admin only" });
+  }
+  next();
+};
+
+
 export const checkPlanExpiry = async (req, res, next) => {
   try {
     const user = req.user;

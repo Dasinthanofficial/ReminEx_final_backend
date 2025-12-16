@@ -1,10 +1,6 @@
-// backend/src/controllers/visionController.js
 import { analyzeImageWithGemini } from "../utils/geminiVisionClient.js";
 
-/**
- * Extract + parse a JSON object from model output.
- * Handles code fences and some common formatting issues.
- */
+
 const tryParseJsonFromText = (raw = "") => {
   let s = String(raw || "").trim();
 
@@ -25,10 +21,7 @@ const tryParseJsonFromText = (raw = "") => {
   return JSON.parse(s);
 };
 
-/**
- * If JSON parsing fails, try to extract fields via regex.
- * This prevents "default fallback" when Gemini returns slightly malformed JSON.
- */
+
 const tryExtractFieldsHeuristically = (raw = "") => {
   const s = String(raw || "");
 

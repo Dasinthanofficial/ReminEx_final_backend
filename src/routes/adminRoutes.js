@@ -1,12 +1,15 @@
-import express from "express";
 import {
   getAdminDashboard,
   getAllUsers,
   deleteUser,
   sendPromotionEmail,
   uploadAdminImage,
+  updateUserRole,      // 👈 add this
 } from "../controllers/adminController.js";
-import { protect, adminOnly } from "../middleware/authMiddleware.js";
+
+import { protect, adminOnly, superAdminOnly } from "../middleware/authMiddleware.js";
+
+import { protect, adminOnly, superAdminOnly } from "../middleware/authMiddleware.js";
 import { validateMonthYear, validateMongoId } from "../middleware/validators.js";
 import upload from "../middleware/uploadMiddleware.js";
 
@@ -24,6 +27,16 @@ router.post(
   adminOnly,
   upload.single("image"),
   uploadAdminImage
+);
+
+
+// SUPER ADMIN: change user role
+router.put(
+  "/users/:id/role",
+  protect,
+  superAdminOnly,
+  validateMongoId,
+  updateUserRole
 );
 
 export default router;
