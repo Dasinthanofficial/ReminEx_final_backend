@@ -176,10 +176,11 @@ export const getUserNotifications = async (req, res) => {
         message,
         expiryDate: p.expiryDate,
         createdAt: p.createdAt,
+        diffDays, // ✅ added so frontend can group by severity
       };
     });
 
-    // Optional friendly summary
+    // Optional friendly summary at top
     let summary = null;
     if (notifications.length > 0) {
       const count = notifications.length;

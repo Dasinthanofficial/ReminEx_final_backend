@@ -61,6 +61,9 @@ export const updatePlan = async (req, res) => {
   try {
     const data = normalizePlanBody(req.body);
 
+    // ✅ Do not allow changing 'name' of existing plan (Free/Monthly/Yearly)
+    if (data.name) delete data.name;
+
     const plan = await Plan.findByIdAndUpdate(req.params.id, data, {
       new: true,
       runValidators: true, // ✅ IMPORTANT
@@ -74,8 +77,6 @@ export const updatePlan = async (req, res) => {
 };
 
 // ✅ Delete plan
-
-
 export const deletePlan = async (req, res) => {
   try {
     const plan = await Plan.findByIdAndDelete(req.params.id);

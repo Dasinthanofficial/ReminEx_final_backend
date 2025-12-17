@@ -3,7 +3,7 @@ import {
   getUserDashboard,
   getUserMonthlyReport,
   updateUserProfile,
-  getUserNotifications, // 🟢
+  getUserNotifications,
 } from "../controllers/userController.js";
 import {
   protect,
