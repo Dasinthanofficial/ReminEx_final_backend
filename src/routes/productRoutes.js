@@ -89,8 +89,8 @@
 
 // export default router;
 
-
 import express from "express";
+
 import {
   getProducts,
   getProduct,
@@ -98,40 +98,63 @@ import {
   updateProduct,
   deleteProduct,
 } from "../controllers/productController.js";
-import { getRecipeSuggestion, translateText } from "../controllers/geminiController.js";
-import { protect, checkPlanExpiry, requirePremium } from "../middleware/authMiddleware.js";
-import { validateProduct, validateProductUpdate, validateMongoId } from "../middleware/validators.js";
+
+import {
+  getRecipeSuggestion,
+  translateText,
+} from "../controllers/geminiController.js";
+
+import {
+  protect,
+  checkPlanExpiry,
+  requirePremium,
+} from "../middleware/authMiddleware.js";
+
+import {
+  validateProduct,
+  validateProductUpdate,
+  validateMongoId,
+} from "../middleware/validators.js";
+
 import upload from "../middleware/uploadMiddleware.js";
-import { getSavedRecipes, saveRecipe, deleteSavedRecipe } from "../controllers/recipeController.js";
+
+import {
+  getSavedRecipes,
+  saveRecipe,
+  deleteSavedRecipe,
+} from "../controllers/recipeController.js";
+
 import { scanProductByBarcode } from "../controllers/scanController.js";
+
 import { predictSpoilageFromImage } from "../controllers/visionController.js";
 
-// ✅ NEW: Tesseract OCR controller
+// ✅ OCR controller (Tesseract)
 import { extractProductFromImagesTesseract } from "../controllers/ocrController.js";
 
 const router = express.Router();
 
-// 🛡️ Protect all routes & check plan expiry first
+// 🛡️ All routes below require login + plan expiry check
 router.use(protect, checkPlanExpiry);
 
-// 🧠 AI: recipe suggestions (premium users only)
+// ----------------------------------------------------
+// AI / Utilities
+// ----------------------------------------------------
+
+// 🧠 AI recipes (premium only)
 router.post("/recipe", requirePremium, getRecipeSuggestion);
 
-// 🌍 AI: translate recipe text (premium only)
+// 🌍 Translate (premium only)
 router.post("/translate", requirePremium, translateText);
 
-// 💾 Saved recipes
-router.get("/recipes/saved", getSavedRecipes);
-router.post("/recipes/save", saveRecipe);
-router.delete("/recipes/:id", deleteSavedRecipe);
-
-// 🔎 Scan product by barcode (Open Food Facts)
+// 🔎 Barcode scan (OpenFoodFacts)
 router.get("/scan/barcode/:code", scanProductByBarcode);
 
-// 🧠 AI Vision: predict spoilage for fruits/vegetables from an image
+// 🧠 Vision: predict spoilage from image
+// Frontend sends multipart/form-data with field "image"
 router.post("/predict-image", upload.single("image"), predictSpoilageFromImage);
 
-// ✅ OCR from front/back images (Tesseract)
+// ✅ OCR: extract product info from front/back images (Tesseract)
+// Frontend sends multipart/form-data with fields "front" and/or "back"
 router.post(
   "/ocr",
   upload.fields([
@@ -141,19 +164,31 @@ router.post(
   extractProductFromImagesTesseract
 );
 
-// ✅ Get products
+// ----------------------------------------------------
+// Saved recipes
+// ----------------------------------------------------
+router.get("/recipes/saved", getSavedRecipes);
+router.post("/recipes/save", saveRecipe);
+router.delete("/recipes/:id", deleteSavedRecipe);
+
+// ----------------------------------------------------
+// Products CRUD
+// ----------------------------------------------------
 router.get("/", getProducts);
 
-// ✅ Get single product
+// ⚠️ MUST stay below "/ocr" (otherwise "ocr" gets treated as ":id")
 router.get("/:id", validateMongoId, getProduct);
 
-// ✅ Add product (supports image file or URL)
 router.post("/", upload.single("image"), validateProduct, addProduct);
 
-// ✅ Update existing product
-router.put("/:id", validateMongoId, upload.single("image"), validateProductUpdate, updateProduct);
+router.put(
+  "/:id",
+  validateMongoId,
+  upload.single("image"),
+  validateProductUpdate,
+  updateProduct
+);
 
-// ✅ Delete product
 router.delete("/:id", validateMongoId, deleteProduct);
 
 export default router;
