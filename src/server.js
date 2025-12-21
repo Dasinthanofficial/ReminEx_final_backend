@@ -181,7 +181,18 @@ import adminRoutes from "./routes/adminRoutes.js";
 import planRoutes from "./routes/planRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
 
+// ✅ NEW: prewarm OCR
+import { prewarmOcr } from "./controllers/ocrController.js";
+
 dotenv.config();
+
+// Helpful crash logs (Render 502 often = process crash/restart)
+process.on("unhandledRejection", (reason) => {
+  console.error("💥 Unhandled Rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("💥 Uncaught Exception:", err);
+});
 
 const app = express();
 app.disable("x-powered-by");
@@ -207,44 +218,39 @@ const parseOrigins = (s) =>
     .map((x) => normalizeOrigin(x))
     .filter(Boolean);
 
-// ✅ Put your real Vercel domain(s) here via env:
-// CLIENT_URLS=https://remin-ex-final-frontend.vercel.app,https://<preview>.vercel.app
 const configuredOrigins = parseOrigins(process.env.CLIENT_URLS || process.env.CLIENT_URL);
 
 // Always allow local dev too
-const allowedOrigins = new Set([...configuredOrigins, "http://localhost:5173"].filter(Boolean));
+const allowedOrigins = new Set(
+  [...configuredOrigins, "http://localhost:5173"].filter(Boolean)
+);
 
-// For debugging on Render logs
 console.log("🌐 Allowed CORS origins:", Array.from(allowedOrigins));
 
 const corsOptions = {
   origin(origin, cb) {
-    // allow non-browser clients (curl/postman) that send no Origin
-    if (!origin) return cb(null, true);
+    if (!origin) return cb(null, true); // allow curl/postman
 
     const o = normalizeOrigin(origin);
 
-    // If you didn't configure CLIENT_URL/CLIENT_URLS, allow all (dev-friendly)
+    // If env not set, allow all (dev-friendly)
     if (configuredOrigins.length === 0) return cb(null, true);
 
-    // ✅ allow only known origins
     if (allowedOrigins.has(o)) return cb(null, true);
 
-    // ✅ do NOT throw errors here. Just disallow.
-    // Throwing can lead to missing headers and confusing browser messages.
     return cb(null, false);
   },
-  credentials: false, // JWT via Authorization header
+  credentials: false,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   optionsSuccessStatus: 204,
 };
 
 app.use(cors(corsOptions));
-
-// ✅ IMPORTANT: do NOT use app.options("*", ...)
-// regex works with your router/path-to-regexp stack
 app.options(/.*/, cors(corsOptions));
+
+// ✅ Optional explicit preflight for OCR route
+app.options("/api/products/ocr", cors(corsOptions));
 
 // ----------------------------
 // Stripe webhook MUST be raw
@@ -270,7 +276,7 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     time: new Date().toISOString(),
-    allowedOrigins: configuredOrigins, // helpful to confirm env
+    allowedOrigins: configuredOrigins,
   });
 });
 
@@ -355,4 +361,9 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log("📅 Daily cron job scheduled at midnight");
+
+  // ✅ Prewarm OCR after server is listening (helps prevent first-request 502)
+  prewarmOcr(["eng"])
+    .then(() => console.log("✅ OCR prewarmed (eng)"))
+    .catch((e) => console.warn("⚠️ OCR prewarm failed:", e?.message || e));
 });
