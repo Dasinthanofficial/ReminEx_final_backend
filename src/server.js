@@ -207,16 +207,19 @@ const parseOrigins = (s) =>
     .map((x) => normalizeOrigin(x))
     .filter(Boolean);
 
-// Set this in Render/Prod env:
-// CLIENT_URLS=https://yourapp.vercel.app,https://yourapp-git-main.vercel.app
+// ✅ Put your real Vercel domain(s) here via env:
+// CLIENT_URLS=https://remin-ex-final-frontend.vercel.app,https://<preview>.vercel.app
 const configuredOrigins = parseOrigins(process.env.CLIENT_URLS || process.env.CLIENT_URL);
 
 // Always allow local dev too
 const allowedOrigins = new Set([...configuredOrigins, "http://localhost:5173"].filter(Boolean));
 
+// For debugging on Render logs
+console.log("🌐 Allowed CORS origins:", Array.from(allowedOrigins));
+
 const corsOptions = {
   origin(origin, cb) {
-    // allow requests with no origin (curl/postman)
+    // allow non-browser clients (curl/postman) that send no Origin
     if (!origin) return cb(null, true);
 
     const o = normalizeOrigin(origin);
@@ -224,22 +227,23 @@ const corsOptions = {
     // If you didn't configure CLIENT_URL/CLIENT_URLS, allow all (dev-friendly)
     if (configuredOrigins.length === 0) return cb(null, true);
 
+    // ✅ allow only known origins
     if (allowedOrigins.has(o)) return cb(null, true);
 
-    // Optional: allow all vercel previews if you want (less strict)
-    // if (o.endsWith(".vercel.app")) return cb(null, true);
-
-    return cb(new Error(`CORS blocked for origin: ${origin}`));
+    // ✅ do NOT throw errors here. Just disallow.
+    // Throwing can lead to missing headers and confusing browser messages.
+    return cb(null, false);
   },
-  credentials: false, // you use Authorization header, not cookies
+  credentials: false, // JWT via Authorization header
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204,
 };
 
 app.use(cors(corsOptions));
 
 // ✅ IMPORTANT: do NOT use app.options("*", ...)
-// Use a regex that matches all routes:
+// regex works with your router/path-to-regexp stack
 app.options(/.*/, cors(corsOptions));
 
 // ----------------------------
@@ -251,7 +255,7 @@ app.post(
   stripeWebhook
 );
 
-// Body parsers for all other routes
+// Body parsers
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
@@ -263,7 +267,11 @@ app.get("/", (req, res) => {
 });
 
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, time: new Date().toISOString() });
+  res.json({
+    ok: true,
+    time: new Date().toISOString(),
+    allowedOrigins: configuredOrigins, // helpful to confirm env
+  });
 });
 
 app.use("/api/auth", authRoutes);
@@ -306,7 +314,7 @@ cron.schedule("0 0 * * *", async () => {
           meta: { productId: p._id, expiryDate: p.expiryDate },
         });
       } catch (e) {
-        console.error(`❌ Failed to send -> ${p.user.email}:`, e?.message || e);
+        console.error("❌ Failed to send email/notification:", e?.message || e);
       }
     }
   } catch (err) {
@@ -317,14 +325,6 @@ cron.schedule("0 0 * * *", async () => {
 // ----------------------------
 // Error handling
 // ----------------------------
-app.use((err, req, res, next) => {
-  // CORS errors come here
-  if (String(err?.message || "").startsWith("CORS blocked")) {
-    return res.status(403).json({ message: err.message });
-  }
-  next(err);
-});
-
 app.use((req, res) => {
   res.status(404).json({ message: "Route not found" });
 });
