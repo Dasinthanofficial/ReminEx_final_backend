@@ -89,6 +89,7 @@
 
 // export default router;
 
+
 import express from "express";
 
 import {
@@ -99,16 +100,9 @@ import {
   deleteProduct,
 } from "../controllers/productController.js";
 
-import {
-  getRecipeSuggestion,
-  translateText,
-} from "../controllers/geminiController.js";
+import { getRecipeSuggestion, translateText } from "../controllers/geminiController.js";
 
-import {
-  protect,
-  checkPlanExpiry,
-  requirePremium,
-} from "../middleware/authMiddleware.js";
+import { protect, checkPlanExpiry, requirePremium } from "../middleware/authMiddleware.js";
 
 import {
   validateProduct,
@@ -116,7 +110,8 @@ import {
   validateMongoId,
 } from "../middleware/validators.js";
 
-import upload from "../middleware/uploadMiddleware.js";
+// ✅ Option 1: default upload (5MB) + OCR upload (10MB)
+import upload, { uploadOCR } from "../middleware/uploadMiddleware.js";
 
 import {
   getSavedRecipes,
@@ -149,15 +144,13 @@ router.post("/translate", requirePremium, translateText);
 // 🔎 Barcode scan (OpenFoodFacts)
 router.get("/scan/barcode/:code", scanProductByBarcode);
 
-// 🧠 Vision: predict spoilage from image
-// Frontend sends multipart/form-data with field "image"
+// 🧠 Vision: predict spoilage from image (uses normal 5MB upload)
 router.post("/predict-image", upload.single("image"), predictSpoilageFromImage);
 
-// ✅ OCR: extract product info from front/back images (Tesseract)
-// Frontend sends multipart/form-data with fields "front" and/or "back"
+// ✅ OCR: extract product info from front/back images (uses OCR 10MB upload)
 router.post(
   "/ocr",
-  upload.fields([
+  uploadOCR.fields([
     { name: "front", maxCount: 1 },
     { name: "back", maxCount: 1 },
   ]),
@@ -179,8 +172,10 @@ router.get("/", getProducts);
 // ⚠️ MUST stay below "/ocr" (otherwise "ocr" gets treated as ":id")
 router.get("/:id", validateMongoId, getProduct);
 
+// Add product (normal 5MB upload)
 router.post("/", upload.single("image"), validateProduct, addProduct);
 
+// Update product (normal 5MB upload)
 router.put(
   "/:id",
   validateMongoId,
