@@ -7,12 +7,12 @@ const isDev = process.env.NODE_ENV !== "production";
 
 /**
  * Cache workers per language so we don't re-initialize every request.
- * lang examples: "eng", "eng+tam"
+ * Example langs: "eng", "eng+tam"
  */
 const workerCache = new Map();
 
 /**
- * Serialize OCR per language to avoid CPU/RAM spikes (prevents 502 on small servers)
+ * Serialize OCR per language to avoid CPU/RAM spikes (prevents 502 on small instances)
  */
 const langLocks = new Map();
 const withLangLock = async (langKey, fn) => {
@@ -22,10 +22,40 @@ const withLangLock = async (langKey, fn) => {
   return run;
 };
 
+// Sharp memory tuning (important on Render)
+sharp.cache(false);
+sharp.concurrency(1);
+
+/**
+ * FAST preprocess: quick + usually good enough
+ */
+async function preprocessFast(buffer) {
+  return sharp(buffer)
+    .rotate()
+    .resize({ width: 1100, withoutEnlargement: true })
+    .grayscale()
+    .sharpen()
+    .toBuffer();
+}
+
+/**
+ * QUALITY preprocess: heavier, better on low-contrast/noisy labels
+ */
+async function preprocessQuality(buffer) {
+  return sharp(buffer)
+    .rotate()
+    .resize({ width: 1600, withoutEnlargement: true })
+    .grayscale()
+    .normalize()
+    .median(1) // tiny denoise
+    .sharpen()
+    .threshold(180)
+    .toBuffer();
+}
+
 /**
  * ✅ tesseract.js v7: createWorker(langs, oem, options)
- * Passing options object as first param can crash with:
- * "langsArr.map is not a function"
+ * Do NOT pass logger functions; do NOT pass options as first param.
  */
 async function getWorker(lang = "eng") {
   const key = (lang || "eng").toString().trim() || "eng";
@@ -34,44 +64,33 @@ async function getWorker(lang = "eng") {
   const p = (async () => {
     const cachePath = path.join(os.tmpdir(), "tesseract-cache");
 
-    // ✅ correct signature for v7
-    const worker = await createWorker(key, 1, {
-      cachePath,
-      // DO NOT pass logger: () => {} (functions cannot be cloned to worker threads)
-    });
+    // OEM 1 = LSTM (good accuracy)
+    const worker = await createWorker(key, 1, { cachePath });
 
     await worker.setParameters({
+      // whitelist helps avoid random garbage chars
       tessedit_char_whitelist:
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/.-,:₹$€£()% ",
+      preserve_interword_spaces: "1",
+      user_defined_dpi: "300",
     });
 
     return worker;
   })();
 
+  // If init fails once, let future requests retry
   p.catch(() => workerCache.delete(key));
+
   workerCache.set(key, p);
   return p;
 }
 
+/**
+ * Optional warm-up to avoid slow first request
+ */
 export const prewarmOcr = async (langs = ["eng"]) => {
   for (const l of langs) await getWorker(l);
 };
-
-// Reduce sharp memory on small servers
-sharp.cache(false);
-sharp.concurrency(1);
-
-async function preprocess(buffer) {
-  // If still slow/unreliable on Render, lower width to 1000 and remove normalize/threshold.
-  return sharp(buffer)
-    .rotate()
-    .resize({ width: 1300, withoutEnlargement: true })
-    .grayscale()
-    .normalize()
-    .sharpen()
-    .threshold(180)
-    .toBuffer();
-}
 
 function cleanText(t = "") {
   return String(t)
@@ -108,6 +127,7 @@ function parseExpiryISO(text) {
 
   const scope = (keyLines.length ? keyLines : lines).join("\n");
 
+  // YYYY-MM-DD or YYYY/MM/DD
   let m = scope.match(/\b(20\d{2})[-\/\.](\d{1,2})[-\/\.](\d{1,2})\b/);
   if (m) {
     const y = Number(m[1]);
@@ -116,6 +136,7 @@ function parseExpiryISO(text) {
     return `${y}-${mo}-${d}`;
   }
 
+  // DD/MM/YYYY or DD-MM-YYYY
   m = scope.match(/\b(\d{1,2})[-\/\.](\d{1,2})[-\/\.](20\d{2})\b/);
   if (m) {
     const day = Number(m[1]);
@@ -201,14 +222,56 @@ function guessName(frontText, backText) {
   return candidates[0].trim();
 }
 
+async function recognizeTwoPass(worker, buffer, { fastPsm = "6", qualityPsm = "3" } = {}) {
+  // FAST pass params
+  await worker.setParameters({
+    tessedit_pageseg_mode: fastPsm, // 6 = uniform block
+    load_system_dawg: "0",
+    load_freq_dawg: "0",
+  });
+
+  const fastPre = await preprocessFast(buffer);
+  const fast = await worker.recognize(fastPre);
+  const fastText = cleanText(fast?.data?.text || "");
+  const fastConf = Number(fast?.data?.confidence ?? 0);
+
+  // If fast looks good, stop early
+  const fastHasExpiry = !!parseExpiryISO(fastText);
+  const fastHasPrice = parsePrice(fastText) != null;
+
+  if (fastConf >= 75 && (fastHasExpiry || fastHasPrice)) {
+    return { text: fastText, confidence: fastConf, mode: "fast" };
+  }
+
+  // QUALITY pass params
+  await worker.setParameters({
+    tessedit_pageseg_mode: qualityPsm, // 3 = fully automatic page segmentation
+    load_system_dawg: "1",
+    load_freq_dawg: "1",
+  });
+
+  const qPre = await preprocessQuality(buffer);
+  const q = await worker.recognize(qPre);
+  const qText = cleanText(q?.data?.text || "");
+  const qConf = Number(q?.data?.confidence ?? 0);
+
+  // Choose best by confidence, but prefer whichever yields key fields
+  const qHasExpiry = !!parseExpiryISO(qText);
+  const qHasPrice = parsePrice(qText) != null;
+
+  const chooseQuality =
+    (qHasExpiry && !fastHasExpiry) ||
+    (qHasPrice && !fastHasPrice) ||
+    qConf >= fastConf + 5;
+
+  return chooseQuality
+    ? { text: qText, confidence: qConf, mode: "quality" }
+    : { text: fastText, confidence: fastConf, mode: "fast" };
+}
+
 // POST /api/products/ocr (multipart: front, back; optional body.lang)
 export const extractProductFromImagesTesseract = async (req, res) => {
   try {
-    if (isDev) {
-      console.log("OCR files keys:", Object.keys(req.files || {}));
-      console.log("OCR front?", !!req.files?.front?.[0], "back?", !!req.files?.back?.[0]);
-    }
-
     const front = req.files?.front?.[0];
     const back = req.files?.back?.[0];
 
@@ -219,36 +282,63 @@ export const extractProductFromImagesTesseract = async (req, res) => {
     const lang = (req.body?.lang || "eng").toString().trim() || "eng";
     const worker = await getWorker(lang);
 
-    const result = await withLangLock(lang, async () => {
+    const out = await withLangLock(lang, async () => {
+      // OCR front first, back only if needed (speed)
       let frontText = "";
       let backText = "";
+      let frontMeta = null;
+      let backMeta = null;
 
       if (front?.buffer) {
-        const pre = await preprocess(front.buffer);
-        const { data } = await worker.recognize(pre);
-        frontText = cleanText(data?.text || "");
+        const r = await recognizeTwoPass(worker, front.buffer);
+        frontText = r.text;
+        frontMeta = { confidence: r.confidence, mode: r.mode };
       }
 
-      if (back?.buffer) {
-        const pre = await preprocess(back.buffer);
-        const { data } = await worker.recognize(pre);
-        backText = cleanText(data?.text || "");
+      // Decide if we need back
+      const nameGuess = guessName(frontText, "");
+      const expiryFront = parseExpiryISO(frontText);
+      const priceFront = parsePrice(frontText);
+
+      const needBack =
+        !nameGuess || !expiryFront || priceFront == null;
+
+      if (needBack && back?.buffer) {
+        const r = await recognizeTwoPass(worker, back.buffer);
+        backText = r.text;
+        backMeta = { confidence: r.confidence, mode: r.mode };
       }
 
       const mergedText = `${frontText}\n\n${backText}`.trim();
 
+      const expiryDateISO = parseExpiryISO(mergedText);
+      const priceNumber = parsePrice(mergedText);
+      const { quantityNumber, quantityUnit } = parseQuantity(mergedText);
+      const name = guessName(frontText, backText);
+      const category = guessCategory(mergedText);
+
       return {
         success: true,
-        name: guessName(frontText, backText),
-        priceNumber: parsePrice(mergedText),
-        ...parseQuantity(mergedText),
-        expiryDateISO: parseExpiryISO(mergedText),
-        category: guessCategory(mergedText),
+        name,
+        priceNumber,
+        quantityNumber,
+        quantityUnit,
+        expiryDateISO,
+        category,
         rawText: mergedText,
+        ...(isDev
+          ? {
+              debug: {
+                lang,
+                front: frontMeta,
+                back: backMeta,
+              },
+            }
+          : {}),
       };
     });
 
-    return res.json(result);
+    return res.json(out);
   } catch (err) {
     console.error("Tesseract OCR error:", err?.message || err);
     return res.status(500).json({ message: "Failed to OCR product images" });
