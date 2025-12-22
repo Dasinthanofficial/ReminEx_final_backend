@@ -11,7 +11,7 @@ const ZERO_DECIMAL_CURRENCIES = [
   "UGX","VND","VUV","XAF","XOF","XPF"
 ];
 
-// ✅ Lazy Stripe init (prevents Render crash when STRIPE_SECRET_KEY missing)
+// ✅ Lazy Stripe init
 let stripeClient = null;
 
 const getStripe = () => {
@@ -31,10 +31,25 @@ const getStripe = () => {
 const requireStripeConfigured = (res) => {
   if (!process.env.STRIPE_SECRET_KEY) {
     return res.status(500).json({
-      message: "Stripe is not configured on the server. Please set STRIPE_SECRET_KEY in environment variables.",
+      message:
+        "Stripe is not configured on the server. Please set STRIPE_SECRET_KEY in environment variables.",
     });
   }
   return null;
+};
+
+// ✅ robust client url resolver
+const normalizeUrl = (u) => String(u || "").trim().replace(/\/+$/, "");
+const getClientUrl = () => {
+  const direct = normalizeUrl(process.env.CLIENT_URL);
+  if (direct) return direct;
+
+  const list = String(process.env.CLIENT_URLS || "")
+    .split(",")
+    .map(normalizeUrl)
+    .filter(Boolean);
+
+  return list[0] || "";
 };
 
 const fulfillOrder = async (session) => {
@@ -69,7 +84,6 @@ const fulfillOrder = async (session) => {
       ? (session.amount_total || 0)
       : (session.amount_total || 0) / 100;
 
-    // NOTE: you always add +7 here. That matches your "7-day trial" design.
     const durationDays = finalPlanName === "Yearly" ? 365 : 30;
     const expiry = new Date();
     expiry.setDate(expiry.getDate() + durationDays + 7);
@@ -78,7 +92,6 @@ const fulfillOrder = async (session) => {
     user.planExpiry = expiry;
     await user.save();
 
-    // Stripe subscription id
     let stripeSubId = null;
     if (typeof session.subscription === "string") stripeSubId = session.subscription;
     else if (session.subscription?.id) stripeSubId = session.subscription.id;
@@ -95,16 +108,9 @@ const fulfillOrder = async (session) => {
       subscriptionId: stripeSubId,
     });
 
-    // Best-effort email
     try {
-      const subject =
-        amountPaid === 0 ? "Your 7-Day Free Trial Started!" : "Payment Receipt";
-
-      await sendEmail(
-        user.email,
-        subject,
-        `Hi ${user.name}, your ${finalPlanName} plan is now active.`
-      );
+      const subject = amountPaid === 0 ? "Your 7-Day Free Trial Started!" : "Payment Receipt";
+      await sendEmail(user.email, subject, `Hi ${user.name}, your ${finalPlanName} plan is now active.`);
     } catch (emailErr) {
       console.error("⚠️ Email send failed:", emailErr?.message || emailErr);
     }
@@ -116,13 +122,20 @@ const fulfillOrder = async (session) => {
 };
 
 // --------------------------------------------------
-// 2. CREATE CHECKOUT SESSION (WITH 7-DAY TRIAL)
+// CREATE CHECKOUT SESSION (WITH 7-DAY TRIAL)
 // --------------------------------------------------
 export const createCheckoutSession = async (req, res) => {
   try {
-    // ✅ don’t crash if missing Stripe config
     const stripeMissing = requireStripeConfigured(res);
     if (stripeMissing) return stripeMissing;
+
+    const clientUrl = getClientUrl();
+    if (!clientUrl || !/^https?:\/\//i.test(clientUrl)) {
+      return res.status(500).json({
+        message:
+          "CLIENT_URL is not configured correctly on the server. Set CLIENT_URL to your frontend URL (e.g. https://yourapp.vercel.app).",
+      });
+    }
 
     const stripe = getStripe();
 
@@ -138,7 +151,7 @@ export const createCheckoutSession = async (req, res) => {
       return res.status(400).json({ message: "Free plan does not require payment." });
     }
 
-    const targetCurrency = (currency || "USD").toUpperCase();
+    const targetCurrency = String(currency || "USD").toUpperCase();
 
     let rate;
     try {
@@ -150,11 +163,8 @@ export const createCheckoutSession = async (req, res) => {
     }
 
     const convertedAmount = plan.price * rate;
-
     const isZeroDecimal = ZERO_DECIMAL_CURRENCIES.includes(targetCurrency);
-    const stripeAmount = isZeroDecimal
-      ? Math.round(convertedAmount)
-      : Math.round(convertedAmount * 100);
+    const stripeAmount = isZeroDecimal ? Math.round(convertedAmount) : Math.round(convertedAmount * 100);
 
     if (stripeAmount < 50 && !isZeroDecimal) {
       return res.status(400).json({ message: `Amount too low to process in ${targetCurrency}` });
@@ -191,8 +201,8 @@ export const createCheckoutSession = async (req, res) => {
           planName: plan.name,
           userId: req.user._id.toString(),
         },
-        success_url: `${process.env.CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.CLIENT_URL}/plans`,
+        success_url: `${clientUrl}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${clientUrl}/plans`,
       });
     } catch (stripeErr) {
       console.error("🔥 STRIPE CHECKOUT ERROR:", stripeErr?.raw?.message || stripeErr?.message || stripeErr);
@@ -202,7 +212,6 @@ export const createCheckoutSession = async (req, res) => {
     }
 
     if (!session?.url) {
-      console.error("❌ Stripe returned no session url:", session);
       return res.status(500).json({
         message: "Failed to create checkout session (no URL returned by Stripe)",
       });
@@ -216,7 +225,7 @@ export const createCheckoutSession = async (req, res) => {
 };
 
 // --------------------------------------------------
-// 3. CANCEL SUBSCRIPTION
+// CANCEL SUBSCRIPTION
 // --------------------------------------------------
 export const cancelSubscription = async (req, res) => {
   try {
@@ -230,11 +239,7 @@ export const cancelSubscription = async (req, res) => {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const sub = await Subscription.findOne({
-      user: user._id,
-      status: "active",
-    }).sort({ createdAt: -1 });
-
+    const sub = await Subscription.findOne({ user: user._id, status: "active" }).sort({ createdAt: -1 });
     if (!sub) return res.status(404).json({ message: "No active subscription" });
 
     let stripeSubId = sub.subscriptionId;
@@ -243,10 +248,7 @@ export const cancelSubscription = async (req, res) => {
       try {
         const session = await stripe.checkout.sessions.retrieve(sub.providerId);
         if (session.subscription) {
-          stripeSubId =
-            typeof session.subscription === "string"
-              ? session.subscription
-              : session.subscription?.id;
+          stripeSubId = typeof session.subscription === "string" ? session.subscription : session.subscription?.id;
         }
       } catch (e) {
         console.warn("Could not retrieve session for providerId:", sub.providerId, e?.message || e);
@@ -282,7 +284,7 @@ export const cancelSubscription = async (req, res) => {
 };
 
 // --------------------------------------------------
-// 4. VERIFY PAYMENT (AFTER REDIRECT FROM STRIPE)
+// VERIFY PAYMENT
 // --------------------------------------------------
 export const verifyPayment = async (req, res) => {
   try {
@@ -302,7 +304,6 @@ export const verifyPayment = async (req, res) => {
 
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-    // ✅ Trials can be "no_payment_required" but still complete
     const ok =
       session.status === "complete" ||
       session.payment_status === "paid" ||
@@ -312,43 +313,30 @@ export const verifyPayment = async (req, res) => {
       await fulfillOrder(session);
 
       const user = await User.findById(req.user._id);
-      return res.json({
-        success: true,
-        plan: user.plan,
-        planExpiry: user.planExpiry,
-      });
+      return res.json({ success: true, plan: user.plan, planExpiry: user.planExpiry });
     }
 
     return res.json({ success: false });
   } catch (err) {
     console.error("❌ Verify Payment Error:", err);
-    return res.status(500).json({
-      success: false,
-      message: err?.message || "Verification failed",
-    });
+    return res.status(500).json({ success: false, message: err?.message || "Verification failed" });
   }
 };
 
 // --------------------------------------------------
-// 5. STRIPE WEBHOOK
+// STRIPE WEBHOOK
 // --------------------------------------------------
 export const stripeWebhook = async (req, res) => {
-  // If Stripe not configured, don’t crash the server; return error to Stripe
   if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) {
     return res.status(500).send("Stripe not configured");
   }
 
   const stripe = getStripe();
-
   const sig = req.headers["stripe-signature"];
   let event;
 
   try {
-    event = stripe.webhooks.constructEvent(
-      req.body,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
     console.error("Webhook signature error:", err?.message || err);
     return res.status(400).send(`Webhook Error: ${err?.message || "Invalid signature"}`);
