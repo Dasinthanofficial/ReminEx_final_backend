@@ -89,7 +89,6 @@
 
 // export default router;
 
-
 import express from "express";
 
 import {
@@ -100,9 +99,16 @@ import {
   deleteProduct,
 } from "../controllers/productController.js";
 
-import { getRecipeSuggestion, translateText } from "../controllers/geminiController.js";
+import {
+  getRecipeSuggestion,
+  translateText,
+} from "../controllers/geminiController.js";
 
-import { protect, checkPlanExpiry, requirePremium } from "../middleware/authMiddleware.js";
+import {
+  protect,
+  checkPlanExpiry,
+  requirePremium,
+} from "../middleware/authMiddleware.js";
 
 import {
   validateProduct,
@@ -120,7 +126,6 @@ import {
 } from "../controllers/recipeController.js";
 
 import { scanProductByBarcode } from "../controllers/scanController.js";
-
 import { predictSpoilageFromImage } from "../controllers/visionController.js";
 
 // ✅ OCR controller (Tesseract)
@@ -144,10 +149,10 @@ router.post("/translate", requirePremium, translateText);
 // 🔎 Barcode scan (OpenFoodFacts)
 router.get("/scan/barcode/:code", scanProductByBarcode);
 
-// 🧠 Vision: predict spoilage from image (uses normal 5MB upload)
+// 🧠 Vision: predict spoilage from image (5MB limit)
 router.post("/predict-image", upload.single("image"), predictSpoilageFromImage);
 
-// ✅ OCR: extract product info from front/back images (uses OCR 10MB upload)
+// ✅ OCR: extract product info from front/back images (10MB per file, max 2 files)
 router.post(
   "/ocr",
   uploadOCR.fields([
@@ -172,10 +177,10 @@ router.get("/", getProducts);
 // ⚠️ MUST stay below "/ocr" (otherwise "ocr" gets treated as ":id")
 router.get("/:id", validateMongoId, getProduct);
 
-// Add product (normal 5MB upload)
+// Add product (5MB limit)
 router.post("/", upload.single("image"), validateProduct, addProduct);
 
-// Update product (normal 5MB upload)
+// Update product (5MB limit)
 router.put(
   "/:id",
   validateMongoId,

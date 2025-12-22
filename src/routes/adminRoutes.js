@@ -7,36 +7,23 @@ import {
   uploadAdminImage,
   updateUserRole,
 } from "../controllers/adminController.js";
-import {
-  protect,
-  adminOnly,
-  superAdminOnly,
-} from "../middleware/authMiddleware.js";
+
+import { protect, adminOnly, superAdminOnly } from "../middleware/authMiddleware.js";
 import { validateMonthYear, validateMongoId } from "../middleware/validators.js";
+
+// ✅ default upload (5MB, 1 file)
 import upload from "../middleware/uploadMiddleware.js";
 
 const router = express.Router();
 
 // Admin dashboard stats
-router.get(
-  "/dashboard",
-  protect,
-  adminOnly,
-  validateMonthYear,
-  getAdminDashboard
-);
+router.get("/dashboard", protect, adminOnly, validateMonthYear, getAdminDashboard);
 
 // Get all users
 router.get("/users", protect, adminOnly, getAllUsers);
 
 // Delete user (no admins / superadmins via this endpoint)
-router.delete(
-  "/users/:id",
-  protect,
-  adminOnly,
-  validateMongoId,
-  deleteUser
-);
+router.delete("/users/:id", protect, adminOnly, validateMongoId, deleteUser);
 
 // Send promotion emails
 router.post("/promote", protect, adminOnly, sendPromotionEmail);
