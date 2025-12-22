@@ -181,7 +181,7 @@ import adminRoutes from "./routes/adminRoutes.js";
 import planRoutes from "./routes/planRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
 
-// ✅ NEW: prewarm OCR
+// ✅ Prewarm OCR
 import { prewarmOcr } from "./controllers/ocrController.js";
 
 dotenv.config();
@@ -218,7 +218,9 @@ const parseOrigins = (s) =>
     .map((x) => normalizeOrigin(x))
     .filter(Boolean);
 
-const configuredOrigins = parseOrigins(process.env.CLIENT_URLS || process.env.CLIENT_URL);
+const configuredOrigins = parseOrigins(
+  process.env.CLIENT_URLS || process.env.CLIENT_URL
+);
 
 // Always allow local dev too
 const allowedOrigins = new Set(
@@ -229,13 +231,15 @@ console.log("🌐 Allowed CORS origins:", Array.from(allowedOrigins));
 
 const corsOptions = {
   origin(origin, cb) {
-    if (!origin) return cb(null, true); // allow curl/postman
+    // allow non-browser clients (curl/postman) that send no Origin
+    if (!origin) return cb(null, true);
 
     const o = normalizeOrigin(origin);
 
     // If env not set, allow all (dev-friendly)
     if (configuredOrigins.length === 0) return cb(null, true);
 
+    // allow only known origins
     if (allowedOrigins.has(o)) return cb(null, true);
 
     return cb(null, false);
@@ -249,7 +253,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 
-// ✅ Optional explicit preflight for OCR route
+// Optional explicit preflight for OCR route
 app.options("/api/products/ocr", cors(corsOptions));
 
 // ----------------------------
@@ -261,7 +265,7 @@ app.post(
   stripeWebhook
 );
 
-// Body parsers
+// Body parsers (after webhook raw route)
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
@@ -362,7 +366,7 @@ app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log("📅 Daily cron job scheduled at midnight");
 
-  // ✅ Prewarm OCR after server is listening (helps prevent first-request 502)
+  // Prewarm OCR after server is listening
   prewarmOcr(["eng"])
     .then(() => console.log("✅ OCR prewarmed (eng)"))
     .catch((e) => console.warn("⚠️ OCR prewarm failed:", e?.message || e));

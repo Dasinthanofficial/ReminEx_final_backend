@@ -234,14 +234,23 @@
 //   }
 // };
 
-
 import sharp from "sharp";
 import { createWorker } from "tesseract.js";
 import os from "os";
 import path from "path";
 
+const isDev = process.env.NODE_ENV !== "production";
+
+/**
+ * Cache workers per language so we don't re-initialize every request.
+ * lang examples: "eng", "eng+tam", "eng+sin"
+ */
 const workerCache = new Map();
 
+/**
+ * Serialize recognize calls per language to avoid concurrent OCR on same worker
+ * (helps prevent CPU/RAM spikes -> Render restart -> 502)
+ */
 const langLocks = new Map();
 const withLangLock = async (langKey, fn) => {
   const prev = langLocks.get(langKey) || Promise.resolve();
@@ -255,9 +264,10 @@ async function getWorker(lang = "eng") {
   if (workerCache.has(key)) return workerCache.get(key);
 
   const p = (async () => {
+    // Use /tmp for cache on Render
     const cachePath = path.join(os.tmpdir(), "tesseract-cache");
 
-    // ✅ IMPORTANT: no logger function here (DataCloneError fix)
+    // ✅ IMPORTANT: DO NOT pass logger: () => {} (DataCloneError in Node worker_threads)
     const worker = await createWorker({ cachePath });
 
     await worker.loadLanguage(key);
@@ -271,19 +281,29 @@ async function getWorker(lang = "eng") {
     return worker;
   })();
 
+  // If creation fails, allow retry later
   p.catch(() => workerCache.delete(key));
+
   workerCache.set(key, p);
   return p;
 }
 
+/**
+ * Prewarm at boot to avoid first-request timeout/502 on Render.
+ * Call from server startup.
+ */
 export const prewarmOcr = async (langs = ["eng"]) => {
-  for (const l of langs) await getWorker(l);
+  for (const l of langs) {
+    await getWorker(l);
+  }
 };
 
+// Reduce sharp memory footprint a bit on small instances
 sharp.cache(false);
 sharp.concurrency(1);
 
 async function preprocess(buffer) {
+  // Strong preprocessing for packaging text
   return sharp(buffer)
     .rotate()
     .resize({ width: 1300, withoutEnlargement: true })
@@ -329,6 +349,7 @@ function parseExpiryISO(text) {
 
   const scope = (keyLines.length ? keyLines : lines).join("\n");
 
+  // YYYY-MM-DD or YYYY/MM/DD
   let m = scope.match(/\b(20\d{2})[-\/\.](\d{1,2})[-\/\.](\d{1,2})\b/);
   if (m) {
     const y = Number(m[1]);
@@ -337,6 +358,7 @@ function parseExpiryISO(text) {
     return `${y}-${mo}-${d}`;
   }
 
+  // DD/MM/YYYY or DD-MM-YYYY
   m = scope.match(/\b(\d{1,2})[-\/\.](\d{1,2})[-\/\.](20\d{2})\b/);
   if (m) {
     const day = Number(m[1]);
@@ -418,15 +440,24 @@ function guessName(frontText, backText) {
     .filter((l) => !bad.test(l));
 
   if (!candidates.length) return "";
-  candidates.sort((a, b) => b.replace(/[^A-Za-z]/g, "").length - a.replace(/[^A-Za-z]/g, "").length);
+  candidates.sort(
+    (a, b) => b.replace(/[^A-Za-z]/g, "").length - a.replace(/[^A-Za-z]/g, "").length
+  );
   return candidates[0].trim();
 }
 
+// POST /api/products/ocr (multipart: front, back; optional body.lang)
 export const extractProductFromImagesTesseract = async (req, res) => {
   try {
-    // ✅ DEBUG (remove later)
-    console.log("OCR files keys:", Object.keys(req.files || {}));
-    console.log("OCR front?", !!req.files?.front?.[0], "back?", !!req.files?.back?.[0]);
+    if (isDev) {
+      console.log("OCR files keys:", Object.keys(req.files || {}));
+      console.log(
+        "OCR front?",
+        !!req.files?.front?.[0],
+        "back?",
+        !!req.files?.back?.[0]
+      );
+    }
 
     const front = req.files?.front?.[0];
     const back = req.files?.back?.[0];
