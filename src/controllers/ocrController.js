@@ -234,50 +234,31 @@
 //   }
 // };
 
+
 import sharp from "sharp";
 import { createWorker } from "tesseract.js";
 import os from "os";
 import path from "path";
 
-/**
- * Cache workers per language so we don't re-initialize every request.
- * lang examples: "eng", "eng+tam", "eng+sin"
- */
 const workerCache = new Map();
 
-/**
- * Serialize recognize calls per language to avoid concurrent OCR on same worker
- * (helps prevent CPU/RAM spikes -> Render restart -> 502)
- */
 const langLocks = new Map();
 const withLangLock = async (langKey, fn) => {
   const prev = langLocks.get(langKey) || Promise.resolve();
-  const run = prev
-    .catch(() => {}) // keep chain alive even if previous failed
-    .then(fn);
-
-  // store a promise that never rejects in the lock map to keep queue moving
+  const run = prev.catch(() => {}).then(fn);
   langLocks.set(langKey, run.catch(() => {}));
   return run;
 };
 
-/**
- * Create/get a cached worker.
- * IMPORTANT: if init fails once, we delete cache so future calls can retry.
- */
 async function getWorker(lang = "eng") {
   const key = (lang || "eng").trim() || "eng";
-
   if (workerCache.has(key)) return workerCache.get(key);
 
   const p = (async () => {
-    // Use /tmp for cache on Render
     const cachePath = path.join(os.tmpdir(), "tesseract-cache");
 
-    const worker = await createWorker({
-      logger: () => {},
-      cachePath, // supported by tesseract.js in Node; safe even if ignored
-    });
+    // ✅ IMPORTANT: no logger function here (DataCloneError fix)
+    const worker = await createWorker({ cachePath });
 
     await worker.loadLanguage(key);
     await worker.initialize(key);
@@ -290,29 +271,19 @@ async function getWorker(lang = "eng") {
     return worker;
   })();
 
-  // If creation fails, allow retry later
   p.catch(() => workerCache.delete(key));
-
   workerCache.set(key, p);
   return p;
 }
 
-/**
- * Prewarm at boot to avoid first-request timeout/502 on Render.
- * Call from server startup.
- */
 export const prewarmOcr = async (langs = ["eng"]) => {
-  for (const l of langs) {
-    await getWorker(l);
-  }
+  for (const l of langs) await getWorker(l);
 };
 
-// Reduce sharp memory footprint a bit on small instances
 sharp.cache(false);
 sharp.concurrency(1);
 
 async function preprocess(buffer) {
-  // Strong preprocessing for packaging text (slightly lower width to reduce CPU/RAM)
   return sharp(buffer)
     .rotate()
     .resize({ width: 1300, withoutEnlargement: true })
@@ -358,7 +329,6 @@ function parseExpiryISO(text) {
 
   const scope = (keyLines.length ? keyLines : lines).join("\n");
 
-  // YYYY-MM-DD or YYYY/MM/DD
   let m = scope.match(/\b(20\d{2})[-\/\.](\d{1,2})[-\/\.](\d{1,2})\b/);
   if (m) {
     const y = Number(m[1]);
@@ -367,7 +337,6 @@ function parseExpiryISO(text) {
     return `${y}-${mo}-${d}`;
   }
 
-  // DD/MM/YYYY or DD-MM-YYYY
   m = scope.match(/\b(\d{1,2})[-\/\.](\d{1,2})[-\/\.](20\d{2})\b/);
   if (m) {
     const day = Number(m[1]);
@@ -402,7 +371,6 @@ function parsePrice(text) {
     .filter((n) => n != null);
 
   const all = [...currency, ...keyword, ...slashDash].filter((n) => n > 0 && n < 100000);
-
   if (!all.length) return null;
   return Math.max(...all);
 }
@@ -440,7 +408,8 @@ function guessName(frontText, backText) {
   const t = cleanText(frontText || backText || "");
   const lines = t.split("\n").map((x) => x.trim()).filter(Boolean);
 
-  const bad = /(ingredients|nutrition|expiry|exp|best before|use by|mrp|price|barcode|manufactured)/i;
+  const bad =
+    /(ingredients|nutrition|expiry|exp|best before|use by|mrp|price|barcode|manufactured)/i;
 
   const candidates = lines
     .slice(0, 25)
@@ -449,16 +418,16 @@ function guessName(frontText, backText) {
     .filter((l) => !bad.test(l));
 
   if (!candidates.length) return "";
-  candidates.sort(
-    (a, b) =>
-      b.replace(/[^A-Za-z]/g, "").length - a.replace(/[^A-Za-z]/g, "").length
-  );
+  candidates.sort((a, b) => b.replace(/[^A-Za-z]/g, "").length - a.replace(/[^A-Za-z]/g, "").length);
   return candidates[0].trim();
 }
 
-// POST /api/products/ocr (multipart: front, back; optional body.lang)
 export const extractProductFromImagesTesseract = async (req, res) => {
   try {
+    // ✅ DEBUG (remove later)
+    console.log("OCR files keys:", Object.keys(req.files || {}));
+    console.log("OCR front?", !!req.files?.front?.[0], "back?", !!req.files?.back?.[0]);
+
     const front = req.files?.front?.[0];
     const back = req.files?.back?.[0];
 
@@ -467,11 +436,8 @@ export const extractProductFromImagesTesseract = async (req, res) => {
     }
 
     const lang = (req.body?.lang || "eng").toString().trim() || "eng";
-
-    // ✅ Get worker (cached)
     const worker = await getWorker(lang);
 
-    // ✅ Run OCR serialized per language (prevents concurrent worker overload)
     const result = await withLangLock(lang, async () => {
       let frontText = "";
       let backText = "";
@@ -490,20 +456,13 @@ export const extractProductFromImagesTesseract = async (req, res) => {
 
       const mergedText = `${frontText}\n\n${backText}`.trim();
 
-      const expiryDateISO = parseExpiryISO(mergedText);
-      const priceNumber = parsePrice(mergedText);
-      const { quantityNumber, quantityUnit } = parseQuantity(mergedText);
-      const name = guessName(frontText, backText);
-      const category = guessCategory(mergedText);
-
       return {
         success: true,
-        name,
-        priceNumber,
-        quantityNumber,
-        quantityUnit,
-        expiryDateISO,
-        category,
+        name: guessName(frontText, backText),
+        priceNumber: parsePrice(mergedText),
+        ...parseQuantity(mergedText),
+        expiryDateISO: parseExpiryISO(mergedText),
+        category: guessCategory(mergedText),
         rawText: mergedText,
       };
     });
