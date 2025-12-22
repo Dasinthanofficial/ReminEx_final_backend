@@ -1,29 +1,3 @@
-// import multer from "multer";
-// import path from "path";
-
-
-// const storage = multer.memoryStorage();
-
-
-// const checkFileType = (file, cb) => {
-//   const filetypes = /jpeg|jpg|png|webp/;
-//   const extname = filetypes.test(
-//     path.extname(file.originalname).toLowerCase()
-//   );
-//   const mimetype = filetypes.test(file.mimetype);
-//   if (extname && mimetype) return cb(null, true);
-//   cb(new Error("Error: Images Only!"));
-// };
-
-// const upload = multer({
-//   storage,
-//   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
-//   fileFilter: (req, file, cb) => checkFileType(file, cb),
-// });
-
-// export default upload;
-
-
 import multer from "multer";
 import path from "path";
 
@@ -41,20 +15,53 @@ const checkFileType = (file, cb) => {
   return cb(err);
 };
 
-const makeUpload = ({ fileSizeMB }) =>
+/**
+ * Build a multer instance.
+ * Note: `limits.files` must match the route usage:
+ * - single() needs files: 1
+ * - fields(front/back) needs files: 2
+ */
+const makeUpload = ({ fileSizeMB, filesLimit, allowedFields = null }) =>
   multer({
     storage,
     limits: {
       fileSize: fileSizeMB * 1024 * 1024,
-      files: 2, // front + back max
+      files: filesLimit,
     },
-    fileFilter: (req, file, cb) => checkFileType(file, cb),
+    fileFilter: (req, file, cb) => {
+      // Optional: enforce allowed field names
+      if (Array.isArray(allowedFields) && allowedFields.length > 0) {
+        if (!allowedFields.includes(file.fieldname)) {
+          const err = new Error(`Invalid field "${file.fieldname}"`);
+          err.status = 400;
+          return cb(err);
+        }
+      }
+      return checkFileType(file, cb);
+    },
   });
 
-// ✅ default (keep strict to avoid RAM spikes)
-export const upload = makeUpload({ fileSizeMB: 5 });
+/**
+ * ✅ Default uploader (5MB, 1 file)
+ * Used for:
+ * - upload.single("image") in products
+ * - upload.single("avatar") in profile
+ * - upload.single("image") in admin upload-image
+ */
+export const upload = makeUpload({
+  fileSizeMB: 5,
+  filesLimit: 1,
+});
 
-// ✅ OCR can be slightly bigger (but beware: memoryStorage uses RAM)
-export const uploadOCR = makeUpload({ fileSizeMB: 10 });
+/**
+ * ✅ OCR uploader (10MB per file, 2 files max: front/back)
+ * Used for:
+ * - uploadOCR.fields([{name:"front"},{name:"back"}])
+ */
+export const uploadOCR = makeUpload({
+  fileSizeMB: 10,
+  filesLimit: 2,
+  allowedFields: ["front", "back"],
+});
 
 export default upload;
