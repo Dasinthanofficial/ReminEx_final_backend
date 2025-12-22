@@ -358,6 +358,11 @@ app.use((err, req, res, next) => {
   });
 });
 
+
+app.get("/api/version", (req, res) => {
+  res.json({ node: process.version, platform: process.platform, arch: process.arch });
+});
+
 // ----------------------------
 // Start server
 // ----------------------------
